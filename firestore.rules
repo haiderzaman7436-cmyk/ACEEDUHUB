@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper: must be signed in ─────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    // Any authenticated user can read/write their own profile.
+    // Admin can read all user profiles.
+    match /users/{userId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Students ─────────────────────────────────────────────────────────────
+    match /students/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Teachers ─────────────────────────────────────────────────────────────
+    match /teachers/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Fees ─────────────────────────────────────────────────────────────────
+    match /fees/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Fee Templates ─────────────────────────────────────────────────────────
+    match /feeTemplates/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Invoices ─────────────────────────────────────────────────────────────
+    match /invoices/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Grade Registrations ───────────────────────────────────────────────────
+    match /gradeRegistrations/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Grade Fee Structures (used by registrationService) ────────────────────
+    match /gradeFeeStructures/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Grade Fee Structures (legacy key used by feeService) ──────────────────
+    match /gradeFeStructures/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Salary Payments ───────────────────────────────────────────────────────
+    match /salaryPayments/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Inventory ─────────────────────────────────────────────────────────────
+    match /stationery/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /uniforms/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /books/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Activity Logs ─────────────────────────────────────────────────────────
+    match /activityLogs/{docId} {
+      allow read, write: if isAuth();
+    }
+  }
+}
