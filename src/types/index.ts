@@ -4,7 +4,7 @@
 
 // ── Roles & Auth ────────────────────────────────────────────────────────────
 
-export type UserRole = 'admin' | 'manager';
+export type UserRole = 'admin' | 'manager' | 'data_operator';
 
 export interface AppUser {
   uid: string;
@@ -305,7 +305,8 @@ export interface StationeryItem {
   id: string;
   name: string;
   category: string;
-  quantity: number;
+  quantity: number;        // total purchased / in stock
+  soldQuantity?: number;   // total sold (tracked via sales collection)
   unitPrice: number;
   supplier?: string;
   reorderLevel: number;
@@ -321,7 +322,8 @@ export interface UniformItem {
   size: string;
   gender: 'male' | 'female' | 'unisex';
   color?: string;
-  quantity: number;
+  quantity: number;        // total purchased / in stock
+  soldQuantity?: number;   // total sold
   unitPrice: number;
   supplier?: string;
   reorderLevel: number;
@@ -339,7 +341,8 @@ export interface BookItem {
   className: string;
   publisher?: string;
   edition?: string;
-  quantity: number;
+  quantity: number;        // total purchased / in stock
+  soldQuantity?: number;   // total sold
   unitPrice: number;
   condition: 'new' | 'good' | 'fair' | 'poor';
   supplier?: string;
@@ -347,6 +350,24 @@ export interface BookItem {
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** A record of one inventory sale transaction */
+export interface InventorySale {
+  id: string;
+  itemId: string;
+  itemType: 'stationery' | 'uniforms' | 'books';
+  itemName: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  month: string;           // e.g. "July 2026"
+  saleDate: string;        // YYYY-MM-DD
+  soldTo?: string;         // student name / customer
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
 }
 
 // ── Registrations (9th & 10th Grade Board Registration) ─────────────────────
@@ -467,4 +488,152 @@ export interface FilterState {
   field: string;
   operator: 'eq' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte';
   value: string | number | boolean;
+}
+
+// ── Expenses ─────────────────────────────────────────────────────────────────
+
+export type ExpenseCategory =
+  | 'salary'
+  | 'utilities'
+  | 'maintenance'
+  | 'stationery'
+  | 'events'
+  | 'rent'
+  | 'transport'
+  | 'miscellaneous';
+
+export type ExpensePaymentMethod = 'cash' | 'bank_transfer' | 'cheque' | 'online';
+
+export interface Expense {
+  id: string;
+  date: string;              // YYYY-MM-DD
+  category: ExpenseCategory;
+  description: string;
+  amount: number;
+  paymentMethod: ExpensePaymentMethod;
+  vendorRecipient?: string;  // who received the money
+  referenceNumber?: string;  // cheque/transaction number
+  approvedBy?: string;
+  notes?: string;
+  month: string;             // e.g. "July 2026" – for grouping
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+}
+
+// ── Exam / Report Card ───────────────────────────────────────────────────────
+
+export interface SubjectMark {
+  subjectName: string;
+  maxMarks: number;
+  obtainedMarks: number;
+}
+
+export type TermType = '1st_term' | '2nd_term' | 'final';
+
+export interface ExamTermResult {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNumber: string;
+  classId: string;
+  className: string;
+  section: string;
+  academicYear: string;        // e.g. "2025-2026"
+  term: TermType;
+  examDateFrom: string;        // YYYY-MM-DD
+  examDateTo: string;          // YYYY-MM-DD
+  subjects: SubjectMark[];
+  totalMaxMarks: number;
+  totalObtainedMarks: number;
+  percentage: number;
+  grade: string;
+  status: 'pass' | 'fail';
+  remarks?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+}
+
+export interface ClassTestResult {
+  subjectName: string;
+  totalTests: number;
+  totalMarks: number;          // sum of max marks across all tests
+  obtainedMarks: number;
+  average: number;             // percentage
+}
+
+export interface AffectiveDomain {
+  behaviour: string;
+  rating: number;              // 1-5
+}
+
+export interface PsychomotorDomain {
+  skill: string;
+  rating: number;              // 1-5
+}
+
+export interface FullReportCard {
+  id: string;
+  studentId: string;
+  studentName: string;
+  admissionNumber: string;
+  classId: string;
+  className: string;
+  section: string;
+  academicYear: string;
+  dateOfBirth: string;
+  gender: string;
+  admissionDate: string;
+  attendance: number;          // percentage
+  totalLeaves: number;
+  totalAbsents: number;
+  termResults: ExamTermResult[];     // 1st, 2nd, Final
+  classTests: ClassTestResult[];
+  affectiveDomains: AffectiveDomain[];
+  psychomotorDomains: PsychomotorDomain[];
+  teacherComments: string;
+  classStrength: number;
+  classAverage: number;
+  classMaxAverage: number;
+  classMinAverage: number;
+  studentPosition: number;
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string;
+}
+
+// ── Class Promotion ──────────────────────────────────────────────────────────
+
+export interface ClassPromotionLog {
+  id: string;
+  fromClass: string;
+  toClass: string;
+  fromSection: string;
+  toSection: string;
+  studentIds: string[];
+  studentCount: number;
+  promotedBy: string;
+  promotedByName: string;
+  academicYear: string;
+  promotedAt: Date;
+  notes?: string;
+}
+
+// ── Exam Session (grouping for marks entry) ───────────────────────────────────
+
+export interface ExamSession {
+  id: string;
+  classId: string;
+  className: string;
+  section: string;
+  term: TermType;
+  academicYear: string;     // e.g. "2025-2026"
+  examDateFrom: string;     // YYYY-MM-DD
+  examDateTo: string;       // YYYY-MM-DD
+  subjects: string[];       // list of subject names
+  status: 'open' | 'submitted' | 'published';
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
 }

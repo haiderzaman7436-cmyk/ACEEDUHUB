@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   BarChart3, TrendingUp, GraduationCap, DollarSign,
   ClipboardCheck, Download, FileText, Users,
-  ArrowUpRight,
+  ArrowUpRight, BookOpen, Printer, Search,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -12,7 +12,11 @@ import { formatCurrency, formatNumber } from '@/lib/utils';
 import { getStudents } from '@/features/students/studentService';
 import { getTeachers } from '@/features/teachers/teacherService';
 import { getFees } from '@/features/fees/feeService';
+import { getExamResultsByStudent } from './examResultService';
+import { ResultCard } from './ResultCard';
+import { FullReportCard } from './FullReportCard';
 import { toast } from 'sonner';
+import type { Student, ExamTermResult, FullReportCard as FullReportCardType } from '@/types';
 import {
   AreaChart, Area,
   BarChart, Bar,
@@ -78,7 +82,19 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
 export default function ReportsPage() {
   const [data, setData] = useState<ReportData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'academic'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'financial' | 'report_cards'>('overview');
+
+  // Report Cards tab state
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [searchQ, setSearchQ] = useState('');
+  const [termResults, setTermResults] = useState<ExamTermResult[]>([]);
+  const [isLoadingResults, setIsLoadingResults] = useState(false);
+  const [showResultCard, setShowResultCard] = useState(false);
+  const [selectedStudentData, setSelectedStudentData] = useState<Student | null>(null);
+  // Full report card (if stored)
+  const [reportCardData, setReportCardData] = useState<FullReportCardType | null>(null);
+  const [showFullCard, setShowFullCard] = useState(false);
 
   useEffect(() => {
     loadReportData();
@@ -92,6 +108,7 @@ export default function ReportsPage() {
         getTeachers(),
         getFees(),
       ]);
+      setAllStudents(students);
 
       // ── Student Analytics ─────────────────────────────────────────────────
 
@@ -171,6 +188,231 @@ export default function ReportsPage() {
     }
   };
 
+  // Class filter for report cards tab
+  const [classFilter, setClassFilter] = useState('');
+
+  // Subjects per class — used to build sample report cards
+  const getSubjectsForClass = (className: string): string[] => {
+    const lower = className.toLowerCase();
+    if (lower.includes('9') || lower.includes('matric') || lower.includes('secondary')) {
+      return ['Urdu', 'English', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Pak Studies', 'Islamiat', 'Computer'];
+    }
+    if (lower.includes('8') || lower.includes('7') || lower.includes('6')) {
+      return ['Urdu', 'English', 'Mathematics', 'Science', 'Social Studies', 'Islamiat', 'Computer'];
+    }
+    if (lower.includes('5') || lower.includes('4') || lower.includes('3')) {
+      return ['Urdu', 'English', 'Mathematics', 'General Science', 'Social Studies', 'Islamiat'];
+    }
+    return ['Urdu', 'English', 'Mathematics', 'General Knowledge', 'Islamiat', 'Drawing'];
+  };
+
+  // Load exam results for selected student (with sample fallback)
+  const handleStudentSelect = async (studentId: string) => {
+    setSelectedStudentId(studentId);
+    if (!studentId) { setTermResults([]); setSelectedStudentData(null); setReportCardData(null); return; }
+    const student = allStudents.find((s) => s.id === studentId) || null;
+    setSelectedStudentData(student);
+    setIsLoadingResults(true);
+    try {
+      const results = await getExamResultsByStudent(studentId);
+      setTermResults(results);
+    } catch {
+      // Non-critical — fall back to sample
+      setTermResults([]);
+    } finally {
+      setIsLoadingResults(false);
+    }
+  };
+
+  const handleBulkPrintClass = () => {
+    if (!classFilter) return;
+    const studentsToPrint = allStudents.filter(s => s.className === classFilter);
+    if (studentsToPrint.length === 0) return;
+
+    const w = window.open('', '_blank', 'width=800,height=1100');
+    if (!w) return;
+    
+    let htmlContent = '';
+    
+    studentsToPrint.forEach((student, index) => {
+      const rc = buildSampleReportCard(student, []);
+      const termResults = rc.termResults;
+      
+      const termHTML = termResults.map((term) => {
+        const isSampleTerm = term.totalObtainedMarks === 0;
+        const rowsHTML = term.subjects.map((sub, idx) => `
+          <tr style="background: ${idx % 2 === 0 ? '#fff' : '#f0fdf4'}">
+            <td style="padding: 5px 8px; border: 1px solid #d1d5db; text-align: center;">${idx + 1}</td>
+            <td style="padding: 5px 8px; border: 1px solid #d1d5db;">${sub.subjectName}</td>
+            <td style="padding: 5px 8px; border: 1px solid #d1d5db; text-align: center; font-weight: 600;">${sub.maxMarks}</td>
+            <td style="padding: 5px 8px; border: 1px solid #d1d5db; text-align: center;">
+              ${isSampleTerm ? '<div style="border-bottom: 1px solid #94a3b8; width: 30px; margin: 4px auto 0;"></div>' : sub.obtainedMarks}
+            </td>
+          </tr>
+        `).join('');
+
+        return `
+          <div>
+            <div style="font-size: 11.5px; font-weight: 800; color: #1e3a8a; background: #e0f2fe; padding: 5px 10px; border-radius: 4px; margin: 12px 0 6px; text-align: center;">
+              SUBJECT-WISE STATEMENT OF MARKS — ${term.term === '1st_term' ? '1st Term Exam' : term.term === '2nd_term' ? '2nd Term Exam' : term.term}
+              ${isSampleTerm ? ' [TEMPLATE]' : ''}
+            </div>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 4px;">
+              <thead>
+                <tr style="background: #d1fae5;">
+                  <th style="padding: 6px 8px; border: 1px solid #6ee7b7; font-size: 10px; font-weight: 700; color: #065f46; text-align: left; width: 40px;">Sr.</th>
+                  <th style="padding: 6px 8px; border: 1px solid #6ee7b7; font-size: 10px; font-weight: 700; color: #065f46; text-align: left;">SUBJECTS</th>
+                  <th style="padding: 6px 8px; border: 1px solid #6ee7b7; font-size: 10px; font-weight: 700; color: #065f46; text-align: center;">Max Marks</th>
+                  <th style="padding: 6px 8px; border: 1px solid #6ee7b7; font-size: 10px; font-weight: 700; color: #065f46; text-align: center;">Obtained</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHTML}
+                <tr style="background: #d1fae5;">
+                  <td colspan="2" style="padding: 6px 8px; border: 1px solid #6ee7b7; font-weight: 800; color: #065f46; text-align: right;">TOTAL</td>
+                  <td style="padding: 6px 8px; border: 1px solid #6ee7b7; font-weight: 800; text-align: center; color: #065f46;">${term.totalMaxMarks}</td>
+                  <td style="padding: 6px 8px; border: 1px solid #6ee7b7; font-weight: 800; text-align: center;">
+                    ${isSampleTerm ? '<div style="border-bottom: 1px solid #94a3b8; width: 40px; margin: 4px auto 0;"></div>' : term.totalObtainedMarks}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      }).join('');
+
+      htmlContent += `
+        <div style="page-break-after: ${index === studentsToPrint.length - 1 ? 'auto' : 'always'};">
+          <div style="text-align: center; margin-bottom: 12px;">
+            <div style="font-size: 22px; font-weight: 900; color: #1e3a8a;">ACE Educational Hub</div>
+            <div style="font-size: 10px; color: #64748b;">+923460204447 | Pakistan</div>
+            <div style="font-size: 18px; font-weight: 700; color: #16a34a; margin-top: 8px; letter-spacing: 2px;">RESULT CARD</div>
+          </div>
+          <div style="border-top: 2px solid #16a34a; margin-bottom: 12px;"></div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; font-size: 11px; margin-bottom: 14px;">
+            <div style="border-bottom: 1px dotted #e2e8f0; padding-bottom: 3px;"><span style="color: #64748b; font-size: 9.5px; font-weight: 600;">Student Name: </span><span style="font-weight: 700; color: #1e3a8a; font-size: 11.5px;">${student.firstName} ${student.lastName}</span></div>
+            <div style="border-bottom: 1px dotted #e2e8f0; padding-bottom: 3px;"><span style="color: #64748b; font-size: 9.5px; font-weight: 600;">Class / Section: </span><span style="font-weight: 700; color: #1e3a8a; font-size: 11.5px;">${student.className} — ${student.section}</span></div>
+            <div style="border-bottom: 1px dotted #e2e8f0; padding-bottom: 3px;"><span style="color: #64748b; font-size: 9.5px; font-weight: 600;">Father Name: </span><span style="font-weight: 700; color: #1e3a8a; font-size: 11.5px;">${student.guardians?.[0]?.name || 'N/A'}</span></div>
+            <div style="border-bottom: 1px dotted #e2e8f0; padding-bottom: 3px;"><span style="color: #64748b; font-size: 9.5px; font-weight: 600;">Admission No: </span><span style="font-weight: 700; color: #1e3a8a; font-size: 11.5px;">${student.admissionNumber}</span></div>
+          </div>
+          ${termHTML}
+          <div style="display: flex; justify-content: space-between; margin-top: 32px; border-top: 1px dashed #94a3b8; padding-top: 12px; font-size: 11px;">
+            <div>
+              <div>Prepared By: <span style="font-weight: 700; color: #1e3a8a; border-bottom: 1px solid #1e3a8a;">ACE Hub</span></div>
+              <div style="margin-top: 8px;">Checked By: <span style="border-bottom: 1px solid #94a3b8; display: inline-block; width: 120px;"></span></div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-weight: 700; color: #1e3a8a;">Controller Of Examination</div>
+              <div style="color: #64748b;">ACE Hub</div>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+
+    w.document.write(`
+      <html>
+        <head>
+          <title>Bulk Print Class ${classFilter}</title>
+          <style>
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 24px; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>${htmlContent}</body>
+      </html>
+    `);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); }, 500);
+  };
+
+  // Build sample FullReportCard for a student using class-based subjects and max marks only
+  const buildSampleReportCard = (student: Student, existingTermResults: ExamTermResult[]): FullReportCardType => {
+    const subjects = getSubjectsForClass(student.className);
+    const maxPerSubject = 100;
+
+    // If real results exist use them; otherwise build blank sample with max marks only
+    const buildSampleTerm = (term: ExamTermResult['term']): ExamTermResult => ({
+      id: `sample-${term}`,
+      studentId: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      admissionNumber: student.admissionNumber,
+      classId: student.classId,
+      className: student.className,
+      section: student.section,
+      academicYear: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+      term,
+      examDateFrom: '',
+      examDateTo: '',
+      subjects: subjects.map((s) => ({ subjectName: s, maxMarks: maxPerSubject, obtainedMarks: 0 })),
+      totalMaxMarks: subjects.length * maxPerSubject,
+      totalObtainedMarks: 0,
+      percentage: 0,
+      grade: '—',
+      status: 'pass' as const,
+      remarks: 'Exam not yet held',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: 'system',
+    });
+
+    const terms = existingTermResults.length > 0 ? existingTermResults : [
+      buildSampleTerm('1st_term'),
+      buildSampleTerm('2nd_term'),
+      buildSampleTerm('final'),
+    ];
+
+    return {
+      id: 'preview',
+      studentId: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      admissionNumber: student.admissionNumber,
+      classId: student.classId,
+      className: student.className,
+      section: student.section,
+      academicYear: `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+      dateOfBirth: student.dateOfBirth,
+      gender: student.gender,
+      admissionDate: student.admissionDate,
+      attendance: 0,
+      totalLeaves: 0,
+      totalAbsents: 0,
+      termResults: terms,
+      classTests: subjects.map((s) => ({ subjectName: s, totalTests: 0, totalMarks: 0, obtainedMarks: 0, average: 0 })),
+      affectiveDomains: [
+        { behaviour: 'Attentiveness', rating: 0 },
+        { behaviour: 'Honesty', rating: 0 },
+        { behaviour: 'Neatness', rating: 0 },
+        { behaviour: 'Perseverance', rating: 0 },
+        { behaviour: 'Politeness', rating: 0 },
+        { behaviour: 'Punctuality', rating: 0 },
+        { behaviour: 'Reliability', rating: 0 },
+        { behaviour: 'Self-Control', rating: 0 },
+        { behaviour: 'Cooperation', rating: 0 },
+      ],
+      psychomotorDomains: [
+        { skill: 'Content Writing', rating: 0 },
+        { skill: 'Creativity', rating: 0 },
+        { skill: 'Religious Norms', rating: 0 },
+        { skill: 'Indoor Games', rating: 0 },
+        { skill: 'Outdoor Games', rating: 0 },
+        { skill: 'Exercise', rating: 0 },
+        { skill: 'Confidence', rating: 0 },
+      ],
+      teacherComments: '',
+      classStrength: allStudents.filter((s) => s.className === student.className).length,
+      classAverage: 0,
+      classMaxAverage: 0,
+      classMinAverage: 0,
+      studentPosition: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      createdBy: 'system',
+    };
+  };
+
   const handleExport = (reportName: string) => {
     toast.success(`${reportName} export triggered. (PDF generation coming soon)`);
   };
@@ -202,11 +444,12 @@ export default function ReportsPage() {
         description="Comprehensive overview of students, finances, attendance, and academics."
       />
 
-      {/* Tab Nav */}
+        {/* Tab Nav */}
       <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))]/60 bg-[hsl(var(--muted))]/30 p-1 w-fit">
         {([
-          { id: 'overview',  label: 'Overview',   icon: BarChart3 },
-          { id: 'financial', label: 'Financial',  icon: DollarSign },
+          { id: 'overview',      label: 'Overview',      icon: BarChart3 },
+          { id: 'financial',     label: 'Financial',     icon: DollarSign },
+          { id: 'report_cards',  label: 'Report Cards',  icon: BookOpen },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -517,6 +760,226 @@ export default function ReportsPage() {
         </div>
       )}
 
+      {/* ── Report Cards Tab ──────────────────────────────────────────────── */}
+      {activeTab === 'report_cards' && (
+        <div className="space-y-5">
+          {/* Header info */}
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 flex items-start gap-3">
+            <BookOpen className="h-5 w-5 text-indigo-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-indigo-800">Class-Based Report Cards</p>
+              <p className="text-xs text-indigo-600 mt-0.5">
+                Select a class and student to generate a printable report card. Where exams have not yet been held,
+                the card will show <strong>maximum marks only</strong> as a template — ready to fill in after results.
+              </p>
+            </div>
+          </div>
+
+          <Card className="border-[hsl(var(--border))]/60 shadow-xs">
+            <CardContent className="p-5 space-y-4">
+              {/* Filters row */}
+              <div className="flex flex-wrap gap-3 items-center">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[hsl(var(--muted-foreground))]" />
+                  <input
+                    value={searchQ}
+                    onChange={(e) => setSearchQ(e.target.value)}
+                    placeholder="Search by student name or ID..."
+                    className="flex h-10 w-full rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                </div>
+                <select
+                  value={classFilter}
+                  onChange={(e) => { setClassFilter(e.target.value); setSelectedStudentId(''); setSelectedStudentData(null); setTermResults([]); }}
+                  className="h-10 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[160px]"
+                >
+                  <option value="">All Classes</option>
+                  {Array.from(new Set(allStudents.map((s) => s.className))).sort().map((cls) => (
+                    <option key={cls} value={cls}>{cls}</option>
+                  ))}
+                </select>
+
+                {classFilter && (
+                  <Button
+                    onClick={handleBulkPrintClass}
+                    className="h-10 gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Bulk Print {classFilter}
+                  </Button>
+                )}
+              </div>
+
+              {/* Two-panel layout: student list + detail */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Student list */}
+                <div>
+                  <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] mb-2">
+                    {classFilter ? `Students in ${classFilter}` : 'All Students'} ({
+                      allStudents.filter((s) => {
+                        const q = searchQ.toLowerCase();
+                        const matchClass = !classFilter || s.className === classFilter;
+                        const matchQ = !q || `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || s.admissionNumber.toLowerCase().includes(q);
+                        return matchClass && matchQ;
+                      }).length
+                    })
+                  </p>
+                  <div className="max-h-80 overflow-y-auto space-y-1 rounded-xl border border-[hsl(var(--border))]/60 p-2 bg-[hsl(var(--muted))]/20">
+                    {allStudents
+                      .filter((s) => {
+                        const q = searchQ.toLowerCase();
+                        const matchClass = !classFilter || s.className === classFilter;
+                        const matchQ = !q || `${s.firstName} ${s.lastName}`.toLowerCase().includes(q) || s.admissionNumber.toLowerCase().includes(q);
+                        return matchClass && matchQ;
+                      })
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => handleStudentSelect(s.id)}
+                          className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all ${
+                            selectedStudentId === s.id
+                              ? 'bg-indigo-600 text-white'
+                              : 'hover:bg-[hsl(var(--accent))]/10'
+                          }`}
+                        >
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-bold text-xs ${
+                            selectedStudentId === s.id ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
+                          }`}>
+                            {s.firstName[0]}{s.lastName[0]}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-sm font-semibold truncate ${selectedStudentId === s.id ? 'text-white' : ''}`}>
+                              {s.firstName} {s.lastName}
+                            </div>
+                            <div className={`text-xs truncate ${selectedStudentId === s.id ? 'text-indigo-100' : 'text-[hsl(var(--muted-foreground))]'}`}>
+                              {s.className} — {s.section} · {s.admissionNumber}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    {allStudents.filter((s) => !classFilter || s.className === classFilter).length === 0 && (
+                      <p className="text-center text-sm text-[hsl(var(--muted-foreground))] py-6">
+                        {classFilter ? `No students in ${classFilter}` : 'No students found.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Student detail + print buttons */}
+                <div>
+                  {selectedStudentData ? (
+                    <div className="rounded-xl border border-[hsl(var(--border))]/60 p-4 space-y-4 h-full">
+                      {/* Student summary */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold text-lg">
+                          {selectedStudentData.firstName[0]}{selectedStudentData.lastName[0]}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-[hsl(var(--foreground))]">
+                            {selectedStudentData.firstName} {selectedStudentData.lastName}
+                          </h3>
+                          <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                            {selectedStudentData.className} — Section {selectedStudentData.section} · ID: {selectedStudentData.admissionNumber}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Exam status */}
+                      {isLoadingResults ? (
+                        <div className="flex items-center gap-2 text-sm text-[hsl(var(--muted-foreground))]">
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-400 border-t-transparent" />
+                          Checking exam results...
+                        </div>
+                      ) : (
+                        <div className={`rounded-lg px-3 py-2 text-xs font-semibold border ${
+                          termResults.length > 0
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                            : 'bg-amber-50 border-amber-200 text-amber-700'
+                        }`}>
+                          {termResults.length > 0
+                            ? `✅ ${termResults.length} term result(s) found — using real data`
+                            : `📋 No exam results yet — report card will show class subjects with max marks as template`
+                          }
+                        </div>
+                      )}
+
+                      {/* Subjects preview */}
+                      <div>
+                        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] mb-1.5">
+                          Subjects for {selectedStudentData.className}:
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getSubjectsForClass(selectedStudentData.className).map((sub) => (
+                            <span key={sub} className="inline-flex items-center px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100 text-[11px] font-medium">
+                              {sub}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Print buttons */}
+                      <div className="flex flex-col gap-2 pt-2 border-t border-[hsl(var(--border))]/60">
+                        <Button
+                          onClick={() => {
+                            const rc = buildSampleReportCard(selectedStudentData, termResults);
+                            setTermResults(rc.termResults);
+                            setShowResultCard(true);
+                          }}
+                          disabled={isLoadingResults}
+                          className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          <Printer className="h-4 w-4" />
+                          Print Result Card
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            const rc = buildSampleReportCard(selectedStudentData, termResults);
+                            setReportCardData(rc);
+                            setShowFullCard(true);
+                          }}
+                          disabled={isLoadingResults}
+                          className="w-full gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+                        >
+                          <Printer className="h-4 w-4" />
+                          Print Full Report Card
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border-2 border-dashed border-[hsl(var(--border))]/60 p-8 flex flex-col items-center justify-center gap-3 text-center h-full min-h-[280px]">
+                      <BookOpen className="h-10 w-10 text-[hsl(var(--muted-foreground))]/40" />
+                      <div>
+                        <p className="text-sm font-semibold text-[hsl(var(--muted-foreground))]">No student selected</p>
+                        <p className="text-xs text-[hsl(var(--muted-foreground))]/70 mt-1">
+                          Filter by class and click a student to generate their report card
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Result Card Modal */}
+      {showResultCard && selectedStudentData && (
+        <ResultCard
+          student={selectedStudentData}
+          termResults={termResults}
+          onClose={() => setShowResultCard(false)}
+        />
+      )}
+
+      {/* Full Report Card Modal */}
+      {showFullCard && reportCardData && selectedStudentData && (
+        <FullReportCard
+          student={selectedStudentData}
+          reportCard={reportCardData}
+          onClose={() => setShowFullCard(false)}
+        />
+      )}
 
     </div>
   );

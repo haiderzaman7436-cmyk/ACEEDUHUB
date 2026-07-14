@@ -1,6 +1,6 @@
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { X, Plus, Trash2, Loader2, Save, Receipt, Info } from 'lucide-react';
+import { X, Plus, Trash2, Loader2, Save, Receipt } from 'lucide-react';
 import { studentSchema, type StudentFormInput } from './studentValidation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,30 +17,30 @@ interface StudentFormProps {
 // ── Class list split by category ─────────────────────────────────────────────
 const SCHOOL_CLASSES = [
   { id: 'nursery', label: 'Nursery' },
-  { id: 'prep',    label: 'Prep' },
-  { id: 'c1',      label: 'Grade 1' },
-  { id: 'c2',      label: 'Grade 2' },
-  { id: 'c3',      label: 'Grade 3' },
-  { id: 'c4',      label: 'Grade 4' },
-  { id: 'c5',      label: 'Grade 5' },
-  { id: 'c6',      label: 'Grade 6' },
-  { id: 'c7',      label: 'Grade 7' },
-  { id: 'c8',      label: 'Grade 8' },
-  { id: 'c9',      label: 'Grade 9' },
+  { id: 'prep', label: 'Prep' },
+  { id: 'c1', label: 'Grade 1' },
+  { id: 'c2', label: 'Grade 2' },
+  { id: 'c3', label: 'Grade 3' },
+  { id: 'c4', label: 'Grade 4' },
+  { id: 'c5', label: 'Grade 5' },
+  { id: 'c6', label: 'Grade 6' },
+  { id: 'c7', label: 'Grade 7' },
+  { id: 'c8', label: 'Grade 8' },
+  { id: 'c9', label: 'Grade 9' },
 ] as const;
 
 const ACADEMY_CLASSES = [
   { id: 'nursery', label: 'Nursery' },
-  { id: 'prep',    label: 'Prep' },
-  { id: 'c1',      label: 'Grade 1' },
-  { id: 'c2',      label: 'Grade 2' },
-  { id: 'c3',      label: 'Grade 3' },
-  { id: 'c4',      label: 'Grade 4' },
-  { id: 'c5',      label: 'Grade 5' },
-  { id: 'c6',      label: 'Grade 6' },
-  { id: 'c7',      label: 'Grade 7' },
-  { id: 'c8',      label: 'Grade 8' },
-  { id: 'c9',      label: 'Grade 9' },
+  { id: 'prep', label: 'Prep' },
+  { id: 'c1', label: 'Grade 1' },
+  { id: 'c2', label: 'Grade 2' },
+  { id: 'c3', label: 'Grade 3' },
+  { id: 'c4', label: 'Grade 4' },
+  { id: 'c5', label: 'Grade 5' },
+  { id: 'c6', label: 'Grade 6' },
+  { id: 'c7', label: 'Grade 7' },
+  { id: 'c8', label: 'Grade 8' },
+  { id: 'c9', label: 'Grade 9' },
 ] as const;
 
 const CLASS_OPTIONS = [...SCHOOL_CLASSES, ...ACADEMY_CLASSES];
@@ -64,14 +64,12 @@ const EMPTY_DEFAULTS: StudentFormInput = {
   rollNumber: '',
   address: '',
   phone: '',
-  email: '',
   status: 'active',
   guardians: [
     {
       name: '',
       relation: 'father',
       phone: '',
-      email: '',
       occupation: '',
       isEmergencyContact: true,
     },
@@ -211,10 +209,6 @@ export function StudentForm({
                 </select>
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Blood Group</label>
-                <Input {...register('bloodGroup')} placeholder="O+" />
-              </div>
-              <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Status</label>
                 <select {...register('status')} className={selectCls}>
                   <option value="active">Active</option>
@@ -252,8 +246,7 @@ export function StudentForm({
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Category</label>
                 <select {...register('category')} className={selectCls}>
-                  <option value="school">🏫 School (Nursery – Grade 5)</option>
-                  <option value="academy">🎓 Academy (Grade 6 – 9)</option>
+                  <option value="school">School</option>
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -297,13 +290,6 @@ export function StudentForm({
                 <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Primary Phone</label>
                 <Input {...register('phone')} placeholder="03001234567" />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Contact Email</label>
-                <Input {...register('email')} placeholder="student@school.com" />
-                {errors.email && (
-                  <p className="text-[10px] text-red-500 font-medium">{errors.email.message}</p>
-                )}
-              </div>
             </div>
           </div>
 
@@ -324,7 +310,7 @@ export function StudentForm({
                     name: '',
                     relation: 'father',
                     phone: '',
-                    email: '',
+
                     occupation: '',
                     isEmergencyContact: false,
                   })
@@ -384,19 +370,6 @@ export function StudentForm({
                       </p>
                     )}
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Email Address</label>
-                    <Input {...register(`guardians.${idx}.email`)} placeholder="tariq@gmail.com" />
-                    {errors.guardians?.[idx]?.email && (
-                      <p className="text-[10px] text-red-500 font-medium">
-                        {errors.guardians[idx]?.email?.message}
-                      </p>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Occupation</label>
-                    <Input {...register(`guardians.${idx}.occupation`)} placeholder="Business Owner" />
-                  </div>
                   <div className="flex items-center gap-2 pt-6">
                     <input
                       type="checkbox"
@@ -445,13 +418,7 @@ export function StudentForm({
             </div>
 
             {/* Info note */}
-            <div className="flex items-start gap-2 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-3">
-              <Info className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
-              {/* <p className="text-[11px] text-blue-700 dark:text-blue-300 leading-relaxed">
-                Fee entries are <strong>optional</strong>. Only fees entered here will generate invoices.
-                Leave this section empty if no fees apply to this student.
-              </p> */}
-            </div>
+
 
             {feeFields.length === 0 && (
               <div className="text-center py-6 text-[hsl(var(--muted-foreground))] text-xs border border-dashed border-[hsl(var(--border))] rounded-2xl">
@@ -557,7 +524,7 @@ export function StudentForm({
               {isSubmitting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Saving...
+                  Saving
                 </>
               ) : (
                 <>

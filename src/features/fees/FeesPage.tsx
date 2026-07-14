@@ -1,16 +1,40 @@
-import { useEffect, useState } from 'react';
-import { CreditCard, X, Loader2, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  CreditCard, X, Loader2, AlertCircle, CheckCircle2, Clock,
+  RefreshCw, ChevronDown, Users, TrendingUp, CalendarDays,
+} from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { getFees, recordPayment } from './feeService';
+import { getFees, getFeesByMonth, getAvailableFeeMonths, recordPayment } from './feeService';
 import type { Fee } from '@/types';
 import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/AuthContext';
 import { formatCurrency, formatDate } from '@/lib/utils';
+
+// Generate list of months from past 12 months + future 3
+function generateMonthOptions(): string[] {
+  const months: string[] = [];
+  const now = new Date();
+  // Past 12 months
+  for (let i = 12; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+  }
+  // Next 3 months
+  for (let i = 1; i <= 3; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    months.push(d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
+  }
+  return months;
+}
+
+function getCurrentMonthLabel(): string {
+  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
 
 function getStatusBadge(status: string) {
   switch (status) {
@@ -26,10 +50,13 @@ function getStatusBadge(status: string) {
 }
 
 export default function FeesPage() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [fees, setFees] = useState<Fee[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthLabel());
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [showAllMonths, setShowAllMonths] = useState(false);
 
   // Pay Fee modal
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -38,14 +65,31 @@ export default function FeesPage() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const loadFees = () => {
-    setIsLoading(true);
-    getFees()
-      .then((data) => setFees(data))
-      .finally(() => setIsLoading(false));
-  };
+  const monthOptions = generateMonthOptions();
 
-  useEffect(() => { loadFees(); }, []);
+  const loadFees = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      let data: Fee[];
+      if (showAllMonths) {
+        data = await getFees();
+      } else {
+        data = await getFeesByMonth(selectedMonth);
+        // If no data for selected month, fall back to all fees for display
+        if (data.length === 0) {
+          // Still show empty state for selected month
+        }
+      }
+      setFees(data);
+
+      // Load available months in background
+      getAvailableFeeMonths().then(setAvailableMonths).catch(() => {});
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedMonth, showAllMonths]);
+
+  useEffect(() => { loadFees(); }, [loadFees]);
 
   const handlePayClick = (fee: Fee) => {
     setSelectedFee(fee);
@@ -77,10 +121,14 @@ export default function FeesPage() {
   const filteredFees = fees.filter((f) => !statusFilter || f.status === statusFilter);
 
   // Summary stats
-  const totalAmount = fees.reduce((s, f) => s + f.amount, 0);
-  const totalPaid = fees.reduce((s, f) => s + f.paidAmount, 0);
+  const totalStudents = new Set(filteredFees.map((f) => f.studentId)).size;
+  const totalAmount = filteredFees.reduce((s, f) => s + f.amount, 0);
+  const totalPaid = filteredFees.reduce((s, f) => s + f.paidAmount, 0);
   const totalPending = totalAmount - totalPaid;
-  const overdueCount = fees.filter((f) => f.status === 'overdue').length;
+  const paidStudents = filteredFees.filter((f) => f.status === 'paid').length;
+  const overdueCount = filteredFees.filter((f) => f.status === 'overdue').length;
+  const pendingCount = filteredFees.filter((f) => f.status === 'pending' || f.status === 'partial').length;
+  const collectionRate = totalAmount > 0 ? Math.round((totalPaid / totalAmount) * 100) : 0;
 
   const columns: Column<Fee>[] = [
     {
@@ -181,7 +229,7 @@ export default function FeesPage() {
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Fee Ledger"
-        description="View and collect monthly fees, track payment status and remaining balances."
+        description="Monthly fee collection — select a month to see complete student fee analysis."
         action={{
           label: 'Refresh',
           onClick: loadFees,
@@ -189,61 +237,187 @@ export default function FeesPage() {
         }}
       />
 
-      {/* Summary Cards */}
+      {/* Month Selector Bar */}
+      <Card className="border border-blue-100 shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0">
+                <CalendarDays className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800">Select Month</div>
+                <div className="text-[11px] text-slate-500">
+                  {availableMonths.length > 0
+                    ? `Data available for ${availableMonths.length} months`
+                    : 'Choose a month to view fee records'}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2.5 items-center">
+              <div className="relative">
+                <select
+                  value={selectedMonth}
+                  onChange={(e) => { setSelectedMonth(e.target.value); setShowAllMonths(false); }}
+                  className="h-10 pl-4 pr-10 rounded-xl border border-blue-200 bg-white text-sm font-semibold text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
+                >
+                  {/* Available months from DB first */}
+                  {availableMonths.length > 0 && (
+                    <optgroup label="── Months with data ──">
+                      {availableMonths.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="── All months ──">
+                    {monthOptions.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </optgroup>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-blue-500 pointer-events-none" />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setShowAllMonths(!showAllMonths); }}
+                className={`h-10 gap-1.5 text-xs font-semibold rounded-xl border-blue-200 ${showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-blue-700'}`}
+              >
+                {showAllMonths ? '✓ Showing All' : 'Show All Months'}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Monthly Analysis Summary */}
+      {hasRole(['admin', 'manager']) && (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border border-slate-200 shadow-sm">
+        {/* Total Students */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-violet-100 flex items-center justify-center shrink-0">
+                <Users className="h-5 w-5 text-violet-600" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500 font-medium truncate">Total Students</div>
+                <div className="text-lg font-bold text-slate-800">{totalStudents}</div>
+                <div className="text-[10px] text-slate-400">{paidStudents} paid · {pendingCount} pending</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Total Assigned */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-blue-100 flex items-center justify-center shrink-0">
                 <CreditCard className="h-5 w-5 text-blue-600" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="text-xs text-slate-500 font-medium">Total Assigned</div>
                 <div className="text-lg font-bold text-slate-800">{formatCurrency(totalAmount)}</div>
+                <div className="text-[10px] text-slate-400">{filteredFees.length} fee records</div>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="border border-slate-200 shadow-sm">
+
+        {/* Collected */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
                 <CheckCircle2 className="h-5 w-5 text-emerald-600" />
               </div>
-              <div>
-                <div className="text-xs text-slate-500 font-medium">Total Collected</div>
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500 font-medium">Collected</div>
                 <div className="text-lg font-bold text-emerald-700">{formatCurrency(totalPaid)}</div>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <div className="h-1.5 w-16 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      style={{ width: `${collectionRate}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-emerald-600 font-semibold">{collectionRate}%</span>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="border border-slate-200 shadow-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                <Clock className="h-5 w-5 text-amber-600" />
-              </div>
-              <div>
-                <div className="text-xs text-slate-500 font-medium">Pending Amount</div>
-                <div className="text-lg font-bold text-amber-700">{formatCurrency(totalPending)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border border-slate-200 shadow-sm">
+
+        {/* Pending + Overdue */}
+        <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
                 <AlertCircle className="h-5 w-5 text-red-600" />
               </div>
-              <div>
-                <div className="text-xs text-slate-500 font-medium">Overdue Records</div>
-                <div className="text-lg font-bold text-red-700">{overdueCount}</div>
+              <div className="min-w-0">
+                <div className="text-xs text-slate-500 font-medium">Outstanding</div>
+                <div className="text-lg font-bold text-red-700">{formatCurrency(totalPending)}</div>
+                <div className="text-[10px] text-slate-400">{overdueCount} overdue records</div>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+      )}
+
+      {/* Status breakdown bar */}
+      {filteredFees.length > 0 && hasRole(['admin', 'manager']) && (
+        <Card className="border border-slate-200 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs font-bold text-slate-600 flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-blue-500" />
+                Fee Collection Progress — {showAllMonths ? 'All Time' : selectedMonth}
+              </div>
+              <div className="text-xs text-slate-500 font-semibold">
+                {formatCurrency(totalPaid)} of {formatCurrency(totalAmount)}
+              </div>
+            </div>
+            <div className="h-2.5 w-full bg-slate-100 rounded-full overflow-hidden flex">
+              <div
+                className="h-full bg-emerald-500 rounded-l-full transition-all duration-700"
+                style={{ width: `${Math.round((filteredFees.filter(f => f.status === 'paid').length / filteredFees.length) * 100)}%` }}
+                title="Paid"
+              />
+              <div
+                className="h-full bg-blue-400 transition-all duration-700"
+                style={{ width: `${Math.round((filteredFees.filter(f => f.status === 'partial').length / filteredFees.length) * 100)}%` }}
+                title="Partial"
+              />
+              <div
+                className="h-full bg-red-400 transition-all duration-700"
+                style={{ width: `${Math.round((filteredFees.filter(f => f.status === 'overdue').length / filteredFees.length) * 100)}%` }}
+                title="Overdue"
+              />
+              <div
+                className="h-full bg-amber-300 rounded-r-full transition-all duration-700"
+                style={{ width: `${Math.round((filteredFees.filter(f => f.status === 'pending').length / filteredFees.length) * 100)}%` }}
+                title="Pending"
+              />
+            </div>
+            <div className="flex gap-4 mt-2">
+              {[
+                { label: 'Paid', color: 'bg-emerald-500', count: filteredFees.filter(f => f.status === 'paid').length },
+                { label: 'Partial', color: 'bg-blue-400', count: filteredFees.filter(f => f.status === 'partial').length },
+                { label: 'Overdue', color: 'bg-red-400', count: filteredFees.filter(f => f.status === 'overdue').length },
+                { label: 'Pending', color: 'bg-amber-300', count: filteredFees.filter(f => f.status === 'pending').length },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                  <div className={`h-2 w-2 rounded-full ${item.color}`} />
+                  <span>{item.label}: <strong>{item.count}</strong></span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Pay Fee Modal */}
       {isPayOpen && selectedFee && (
@@ -270,6 +444,12 @@ export default function FeesPage() {
                   <span className="text-slate-500">Fee:</span>
                   <span className="font-medium text-slate-700">{selectedFee.description || selectedFee.feeType}</span>
                 </div>
+                {selectedFee.month && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Month:</span>
+                    <span className="font-medium text-blue-700">{selectedFee.month}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-500">Total Amount:</span>
                   <span className="font-semibold">{formatCurrency(selectedFee.amount)}</span>
@@ -330,7 +510,20 @@ export default function FeesPage() {
             <div className="flex items-center justify-center h-64">
               <div className="flex flex-col items-center gap-3">
                 <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                <span className="text-sm text-slate-500">Loading fee records...</span>
+                <span className="text-sm text-slate-500">Loading fee records for {showAllMonths ? 'all months' : selectedMonth}...</span>
+              </div>
+            </div>
+          ) : filteredFees.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
+              <div className="h-16 w-16 rounded-2xl bg-slate-100 flex items-center justify-center">
+                <Clock className="h-8 w-8 text-slate-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-slate-700">No Fee Records</p>
+                <p className="text-sm text-slate-400 mt-1">
+                  No fees found for {showAllMonths ? 'any month' : selectedMonth}.
+                  {!showAllMonths && ' Try generating monthly fees or selecting a different month.'}
+                </p>
               </div>
             </div>
           ) : (

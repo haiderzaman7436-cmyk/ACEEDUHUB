@@ -12,7 +12,7 @@ import {
   Receipt, Package, UserPlus, BarChart3, Settings, ChevronDown,
   ChevronLeft, ChevronRight, School, BookText, ClipboardCheck,
   FileText, Pencil, Shirt, BookCopy, Building2, UserCog,
-  Calendar, ScrollText, LogOut, X, Shield,
+  Calendar, ScrollText, LogOut, X, Shield, TrendingDown,
 } from 'lucide-react';
 
 // Icon map
@@ -20,7 +20,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   LayoutDashboard, GraduationCap, Users, BookOpen, DollarSign,
   Receipt, Package, UserPlus, BarChart3, Settings, School,
   BookText, ClipboardCheck, FileText, Pencil, Shirt, BookCopy,
-  Building2, UserCog, Calendar, ScrollText,
+  Building2, UserCog, Calendar, ScrollText, TrendingDown,
 };
 
 interface SidebarProps {

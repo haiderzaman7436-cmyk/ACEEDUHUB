@@ -1,37 +1,53 @@
-import { useEffect, useState } from 'react';
-import { FileDown, Printer, Eye, X, CreditCard, Loader2, CheckCircle2, RefreshCw, Landmark, Receipt } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  Eye, X, CreditCard, Loader2, CheckCircle2, RefreshCw,
+  Landmark, Receipt, Banknote, CalendarDays,
+} from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { getInvoices, payInvoice } from '@/features/fees/feeService';
-import type { Invoice } from '@/types';
+import {
+  getInvoices, payInvoice, generateMonthlyFeesForAll,
+} from '@/features/fees/feeService';
+import { getStudentById } from '@/features/students/studentService';
+import type { Invoice, Student } from '@/types';
 import { toast } from 'sonner';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthContext';
+import { BankInvoicePrint } from '@/features/fees/BankInvoicePrint';
+
+function getCurrentMonthLabel(): string {
+  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
 
 function getStatusBadge(status: string) {
   switch (status) {
     case 'paid':
-      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs font-semibold">✓ Paid</Badge>;
+      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs font-semibold">Paid</Badge>;
     case 'overdue':
-      return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs font-semibold">⚠ Overdue</Badge>;
+      return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs font-semibold">Overdue</Badge>;
     case 'cancelled':
       return <Badge className="bg-slate-100 text-slate-600 border-slate-200 text-xs font-semibold">Cancelled</Badge>;
     default:
-      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs font-semibold">⏳ Unpaid</Badge>;
+      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs font-semibold">Unpaid</Badge>;
   }
 }
 
 export default function InvoicesPage() {
-  const { user } = useAuth();
+  const { user, hasRole } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Challan print states
+  const [challanInvoice, setChallanInvoice] = useState<Invoice | null>(null);
+  const [challanStudent, setChallanStudent] = useState<Student | null>(null);
+  const [isLoadingChallan, setIsLoadingChallan] = useState(false);
 
   // Pay modal
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -40,22 +56,38 @@ export default function InvoicesPage() {
   const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Search/Filters states
+  // Filters
   const [classFilter, setClassFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [showAllMonths, setShowAllMonths] = useState(false);
+  const currentMonth = getCurrentMonthLabel();
 
-  const loadInvoices = () => {
+  const loadInvoices = useCallback(() => {
     setIsLoading(true);
     getInvoices()
       .then((data) => setInvoices(data))
       .finally(() => setIsLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { loadInvoices(); }, []);
+  useEffect(() => { loadInvoices(); }, [loadInvoices]);
 
   const handlePreviewClick = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setIsPreviewOpen(true);
+  };
+
+  const handleChallanClick = async (inv: Invoice) => {
+    setIsLoadingChallan(true);
+    try {
+      const student = await getStudentById(inv.studentId);
+      if (!student) { toast.error('Student data not found.'); return; }
+      setChallanInvoice(inv);
+      setChallanStudent(student);
+    } catch {
+      toast.error('Failed to load challan data.');
+    } finally {
+      setIsLoadingChallan(false);
+    }
   };
 
   const handlePayClick = (inv: Invoice) => {
@@ -85,18 +117,38 @@ export default function InvoicesPage() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleGenerateMonthlyFees = async () => {
+    setIsSubmitting(true);
+    try {
+      const result = await generateMonthlyFeesForAll();
+      if (result.success === 0 && result.skipped === 0) {
+        toast.info('No active students found to generate fees for.');
+      } else {
+        toast.success(`Monthly fees generated: ${result.success} new, ${result.skipped} skipped/already billed.`);
+        loadInvoices();
+      }
+    } catch {
+      toast.error('Failed to generate monthly fees.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  // Filter logic
+  // Filter logic — default: current month only
   const filteredInvoices = invoices.filter((inv) => {
+    const matchesMonth = showAllMonths || (inv.month === currentMonth);
     const matchesClass = !classFilter || inv.className.toLowerCase() === classFilter.toLowerCase();
     const matchesCategory = !categoryFilter || (inv.category || 'school').toLowerCase() === categoryFilter.toLowerCase();
-    return matchesClass && matchesCategory;
+    return matchesMonth && matchesClass && matchesCategory;
   });
 
-  // Extract unique classes dynamically
+  // Summary for current view
+  const totalBill = filteredInvoices.reduce((s, i) => s + i.grandTotal, 0);
+  const totalPaid = filteredInvoices.reduce((s, i) => s + (i.paidAmount || 0), 0);
+  const totalRemaining = totalBill - totalPaid;
+  const paidCount = filteredInvoices.filter((i) => i.status === 'paid').length;
+  const unpaidCount = filteredInvoices.filter((i) => i.status !== 'paid' && i.status !== 'cancelled').length;
+
   const uniqueClasses = Array.from(new Set(invoices.map((inv) => inv.className))).filter(Boolean);
 
   const columns: Column<Invoice>[] = [
@@ -167,28 +219,31 @@ export default function InvoicesPage() {
       header: 'Actions',
       align: 'right',
       cell: (item) => (
-        <div className="flex gap-1.5 justify-end">
+        <div className="flex gap-1.5 justify-end flex-wrap">
+          {/* View Details */}
           <Button
             size="icon"
             variant="ghost"
             className="h-8 w-8 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50"
             onClick={() => handlePreviewClick(item)}
-            title="View Invoice"
+            title="View Invoice Details"
           >
             <Eye className="h-4 w-4" />
           </Button>
+
+          {/* Bank Challan 3-copy — ONLY print option */}
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 rounded-lg text-slate-500 hover:text-slate-700 hover:bg-slate-100"
-            onClick={() => {
-              setSelectedInvoice(item);
-              setTimeout(() => window.print(), 100);
-            }}
-            title="Print"
+            className="h-8 w-8 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+            onClick={() => handleChallanClick(item)}
+            title="Print Bank Challan (3 Copies)"
+            disabled={isLoadingChallan}
           >
-            <FileDown className="h-4 w-4" />
+            {isLoadingChallan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
           </Button>
+
+          {/* Pay */}
           {item.status !== 'paid' && item.status !== 'cancelled' && (
             <Button
               size="sm"
@@ -212,35 +267,18 @@ export default function InvoicesPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Dynamic styles for clean invoice printing */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          #print-invoice-area, #print-invoice-area * {
-            visibility: visible !important;
-          }
-          #print-invoice-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 20px !important;
-            background: white !important;
-            box-shadow: none !important;
-            border: none !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      ` }} />
+      {/* Bank Challan Modal */}
+      {challanInvoice && challanStudent && (
+        <BankInvoicePrint
+          invoice={challanInvoice}
+          student={challanStudent}
+          onClose={() => { setChallanInvoice(null); setChallanStudent(null); }}
+        />
+      )}
 
       <PageHeader
         title="Invoices & Billing"
-        description="View fee invoices, track payment status, and record payments."
+        description="View fee invoices, track payment status, and print bank challans."
         action={{
           label: 'Refresh',
           onClick: loadInvoices,
@@ -268,6 +306,12 @@ export default function InvoicesPage() {
                   <span className="text-slate-500">Student:</span>
                   <span className="font-semibold text-slate-800">{payInvTarget.studentName}</span>
                 </div>
+                {payInvTarget.month && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Month:</span>
+                    <span className="font-semibold text-blue-700">{payInvTarget.month}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-slate-500">Invoice Total:</span>
                   <span className="font-semibold">{formatCurrency(payInvTarget.grandTotal)}</span>
@@ -321,18 +365,22 @@ export default function InvoicesPage() {
       {/* Invoice Preview Modal */}
       {isPreviewOpen && selectedInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm no-print" onClick={() => setIsPreviewOpen(false)} />
-          <Card className="relative w-full max-w-2xl max-h-[90vh] flex flex-col z-10 animate-scale-in overflow-hidden shadow-2xl print:shadow-none print:border-none print:w-full">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsPreviewOpen(false)} />
+          <Card className="relative w-full max-w-2xl max-h-[90vh] flex flex-col z-10 animate-scale-in overflow-hidden shadow-2xl">
             {/* Toolbar */}
-            <div className="flex items-center justify-between bg-slate-50 border-b border-slate-200 p-5 no-print">
+            <div className="flex items-center justify-between bg-slate-50 border-b border-slate-200 p-5">
               <div>
-                <h2 className="font-bold text-slate-800 text-base">Invoice Preview</h2>
+                <h2 className="font-bold text-slate-800 text-base">Invoice Details</h2>
                 <p className="text-xs text-slate-400">{selectedInvoice.invoiceNumber}</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={handlePrint} className="h-8 gap-1.5 text-xs border-slate-200">
-                  <Printer className="h-3.5 w-3.5" />
-                  Print Invoice
+                <Button
+                  size="sm"
+                  onClick={() => { setIsPreviewOpen(false); handleChallanClick(selectedInvoice); }}
+                  className="h-8 gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  <Banknote className="h-3.5 w-3.5" />
+                  Print 3-Copy Challan
                 </Button>
                 <button onClick={() => setIsPreviewOpen(false)} className="text-slate-400 hover:text-slate-600">
                   <X className="h-5 w-5" />
@@ -340,8 +388,8 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            {/* Invoice Content Area (Only this prints) */}
-            <div id="print-invoice-area" className="flex-1 overflow-y-auto p-8 space-y-6 bg-white print:p-0 text-slate-800">
+            {/* Invoice Content Area */}
+            <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white text-slate-800">
               {/* Header */}
               <div className="flex justify-between items-start">
                 <div>
@@ -377,13 +425,13 @@ export default function InvoicesPage() {
                 </div>
                 <div className="text-right">
                   <h4 className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-1">Invoice Details</h4>
-                  <p className="text-slate-600">Issued Date: <span className="font-semibold">{new Date(selectedInvoice.createdAt).toLocaleDateString()}</span></p>
-                  <p className="text-slate-600 mt-0.5">Due Date: <span className="font-semibold text-red-600">{formatDate(selectedInvoice.dueDate)}</span></p>
+                  <p className="text-slate-600">Issued: <span className="font-semibold">{new Date(selectedInvoice.createdAt).toLocaleDateString()}</span></p>
+                  <p className="text-slate-600 mt-0.5">Due: <span className="font-semibold text-red-600">{formatDate(selectedInvoice.dueDate)}</span></p>
                 </div>
               </div>
 
               {/* Items Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
                 <table className="w-full text-xs text-left">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
@@ -430,81 +478,100 @@ export default function InvoicesPage() {
                 </div>
               </div>
 
-              {/* Notes */}
-              {selectedInvoice.notes && (
-                <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-xs text-slate-600 leading-relaxed font-medium">
-                  <span className="font-bold text-slate-800">Notice: </span>{selectedInvoice.notes}
-                </div>
-              )}
-
-              {/* Digital Signature Block */}
-              <div className="pt-8 border-t border-dashed border-slate-200">
-                <div className="grid grid-cols-2 gap-8 text-center text-xs">
-                  <div className="space-y-4">
-                    <div className="h-10 flex items-end justify-center">
-                      <div className="w-32 border-b border-slate-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">Principal / Authorized Signatory</p>
-                      <p className="text-[10px] text-slate-500 font-medium">ACE Education Hub Management</p>
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <div className="h-10 flex items-end justify-center">
-                      <div className="w-32 border-b border-slate-400" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">Accounts / Cashier Sign</p>
-                      <p className="text-[10px] text-slate-500 font-medium">Verified Stamp Area</p>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Stamp & Computer Generated Text */}
-                <div className="mt-8 text-center text-[9px] text-slate-400 space-y-1 bg-slate-50 py-3 rounded-lg border border-slate-100">
-                  <p className="font-semibold text-slate-500">★ ACE EDUCATIONAL HUB — STAMP & DIGITAL RECORD SYSTEM ★</p>
-                  <p>Computer-generated invoice. No physical seal required. Invoice Verification Token: {selectedInvoice.id}</p>
-                </div>
+              {/* Footer note */}
+              <div className="text-center text-[9px] text-slate-400 border-t border-dashed border-slate-200 pt-4">
+                <p className="font-semibold text-slate-500">★ {APP_NAME.toUpperCase()} — DIGITAL RECORD SYSTEM ★</p>
+                <p>Computer-generated invoice. Use "Print 3-Copy Challan" to print the official bank deposit slip.</p>
               </div>
             </div>
           </Card>
         </div>
       )}
 
-      {/* Filter toolbar */}
+      {/* Filter / Summary Toolbar */}
       <Card className="border border-slate-200 shadow-sm">
-        <CardContent className="p-4 flex flex-wrap gap-4 items-center justify-between bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <Receipt className="h-5 w-5 text-blue-600 shrink-0" />
-            <div>
-              <h3 className="text-sm font-bold text-slate-800">Invoice Registry</h3>
-              <p className="text-[11px] text-slate-400 font-medium">Use dropdowns to filter invoices by category or class levels.</p>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-4 items-center justify-between">
+            {/* Left: title + month indicator */}
+            <div className="flex items-center gap-3">
+              <Receipt className="h-5 w-5 text-blue-600 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Invoice Registry</h3>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  {showAllMonths ? 'Showing all months' : `Showing: ${currentMonth}`}
+                  {' · '}{filteredInvoices.length} invoices
+                </p>
+              </div>
             </div>
-          </div>
-          
-          <div className="flex flex-wrap gap-2.5 items-center">
-            {/* Category Filter */}
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            >
-              <option value="">All Categories</option>
-              <option value="school">School Invoices</option>
-              <option value="academy">Academy Invoices</option>
-            </select>
 
-            {/* Class Filter */}
-            <select
-              value={classFilter}
-              onChange={(e) => setClassFilter(e.target.value)}
-              className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            >
-              <option value="">All Classes</option>
-              {uniqueClasses.map((cls) => (
-                <option key={cls} value={cls}>{cls}</option>
-              ))}
-            </select>
+            {/* Summary numbers */}
+            {hasRole(['admin', 'manager']) && (
+              <div className="hidden md:flex gap-6 text-xs">
+                <div className="text-center">
+                  <div className="font-bold text-slate-800">{formatCurrency(totalBill)}</div>
+                  <div className="text-slate-400">Total Billed</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-emerald-700">{formatCurrency(totalPaid)}</div>
+                  <div className="text-slate-400">Collected</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-red-600">{formatCurrency(totalRemaining)}</div>
+                  <div className="text-slate-400">Outstanding</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-slate-700">{paidCount} / {paidCount + unpaidCount}</div>
+                  <div className="text-slate-400">Paid Invoices</div>
+                </div>
+              </div>
+            )}
+
+            {/* Controls */}
+            <div className="flex flex-wrap gap-2.5 items-center">
+              {/* Month toggle */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllMonths(!showAllMonths)}
+                className={`h-9 gap-1.5 text-xs font-semibold rounded-xl ${showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-700'}`}
+              >
+                <CalendarDays className="h-3.5 w-3.5" />
+                {showAllMonths ? 'Current Month Only' : 'Show All Months'}
+              </Button>
+
+              {/* Category Filter */}
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              >
+                <option value="">All Categories</option>
+                <option value="school">School</option>
+                <option value="academy">Academy</option>
+              </select>
+
+              {/* Class Filter */}
+              <select
+                value={classFilter}
+                onChange={(e) => setClassFilter(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+              >
+                <option value="">All Classes</option>
+                {uniqueClasses.map((cls) => (
+                  <option key={cls} value={cls}>{cls}</option>
+                ))}
+              </select>
+
+              {/* Generate Monthly Fees */}
+              <Button
+                onClick={handleGenerateMonthlyFees}
+                disabled={isSubmitting}
+                className="h-9 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl"
+              >
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />}
+                Generate Monthly Fees
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>

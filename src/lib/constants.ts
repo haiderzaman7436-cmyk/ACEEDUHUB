@@ -16,11 +16,13 @@ export const APP_DESCRIPTION = 'A modern school management system for educationa
 export const ROLES = {
   ADMIN: 'admin' as UserRole,
   MANAGER: 'manager' as UserRole,
+  DATA_OPERATOR: 'data_operator' as UserRole,
 } as const;
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Administrator',
   manager: 'Manager',
+  data_operator: 'Data Operator',
 };
 
 // ── Navigation Configuration ────────────────────────────────────────────────
@@ -39,49 +41,62 @@ export const NAV_ITEMS: NavItem[] = [
     title: 'Dashboard',
     href: '/dashboard',
     icon: 'LayoutDashboard',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
-    title: 'Students',
+    title: 'School Students',
     href: '/students',
     icon: 'GraduationCap',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
+  },
+  {
+    title: 'Academy Students',
+    href: '/academy-students',
+    icon: 'Building2',
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
     title: 'Teachers',
     href: '/teachers',
     icon: 'Users',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
   },
 
   {
     title: 'Fees',
     href: '/fees',
     icon: 'DollarSign',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
     title: 'Invoices',
     href: '/invoices',
     icon: 'Receipt',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
     title: 'Inventory',
     href: '/inventory',
     icon: 'Package',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
     children: [
-      { title: 'Stationery', href: '/inventory/stationery', icon: 'Pencil', roles: ['admin', 'manager'] },
-      { title: 'Uniforms', href: '/inventory/uniforms', icon: 'Shirt', roles: ['admin', 'manager'] },
-      { title: 'Books', href: '/inventory/books', icon: 'BookCopy', roles: ['admin', 'manager'] },
+      { title: 'Overview', href: '/inventory', icon: 'BarChart3', roles: ['admin', 'manager'] },
+      { title: 'Stationery', href: '/inventory/stationery', icon: 'Pencil', roles: ['admin', 'manager', 'data_operator'] },
+      { title: 'Uniforms', href: '/inventory/uniforms', icon: 'Shirt', roles: ['admin', 'manager', 'data_operator'] },
+      { title: 'Books', href: '/inventory/books', icon: 'BookCopy', roles: ['admin', 'manager', 'data_operator'] },
     ],
   },
   {
     title: 'Registrations',
     href: '/registrations',
     icon: 'UserPlus',
-    roles: ['admin', 'manager'],
+    roles: ['admin', 'manager', 'data_operator'],
+  },
+  {
+    title: 'Exams',
+    href: '/exams',
+    icon: 'ClipboardCheck',
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
     title: 'Reports',
@@ -94,6 +109,12 @@ export const NAV_ITEMS: NavItem[] = [
     href: '/finance',
     icon: 'Building2',
     roles: ['admin', 'manager'],
+  },
+  {
+    title: 'Expenses',
+    href: '/expenses',
+    icon: 'TrendingDown',
+    roles: ['admin', 'manager', 'data_operator'],
   },
   {
     title: 'Settings',

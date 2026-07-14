@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   GraduationCap, Send, FileText, Award, CreditCard, X,
-  Loader2, CheckCircle2, Users, AlertCircle,
+  Loader2, CheckCircle2, Users,
   UserCheck, Plus, Trash2, Clock,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -31,7 +31,7 @@ type GradeTab = 9 | 10;
 function getStatusBadge(status: string) {
   switch (status) {
     case 'completed':
-      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs font-semibold">✓ Completed</Badge>;
+      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs font-semibold"> Completed</Badge>;
     case 'fees_paid':
       return <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs font-semibold">Fees Paid</Badge>;
     case 'admission_sent':
@@ -39,7 +39,7 @@ function getStatusBadge(status: string) {
     case 'registered':
       return <Badge className="bg-violet-100 text-violet-700 border-violet-200 text-xs font-semibold">Registered</Badge>;
     default:
-      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs font-semibold">⏳ Pending</Badge>;
+      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs font-semibold"> Pending</Badge>;
   }
 }
 
@@ -70,6 +70,8 @@ export default function RegistrationsPage() {
   const [eligibleStudents, setEligibleStudents] = useState<Student[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [manualRegFee, setManualRegFee] = useState<number>(0);
+  const [manualAdmissionFee, setManualAdmissionFee] = useState<number>(0);
 
   // Pay fee modal
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -110,6 +112,16 @@ export default function RegistrationsPage() {
 
   const currentFeeStructure = activeTab === 9 ? grade9Fees : grade10Fees;
 
+  useEffect(() => {
+    if (selectedStudent) {
+      setManualRegFee(currentFeeStructure?.registrationFee || 0);
+      setManualAdmissionFee(currentFeeStructure?.examFee || 0);
+    } else {
+      setManualRegFee(0);
+      setManualAdmissionFee(0);
+    }
+  }, [selectedStudent, currentFeeStructure]);
+
   // Load eligible students (in 9th or 10th grade, active)
   const handleOpenAdd = async () => {
     const allStudents = await getStudents();
@@ -126,13 +138,12 @@ export default function RegistrationsPage() {
 
   const handleAddRegistration = async () => {
     if (!selectedStudent || !user) return;
-    if (!currentFeeStructure) {
-      toast.error('Fee structure not configured. Please set it in Settings → Fee Structure first.');
-      return;
-    }
     setIsSaving(true);
     try {
-      const totalFee = currentFeeStructure.registrationFee + currentFeeStructure.examFee;
+      const regFee = manualRegFee;
+      const examFee = manualAdmissionFee;
+      const totalFee = regFee + examFee;
+      
       await createGradeRegistration({
         studentId: selectedStudent.id,
         studentName: `${selectedStudent.firstName} ${selectedStudent.lastName}`,
@@ -141,10 +152,10 @@ export default function RegistrationsPage() {
         section: selectedStudent.section,
         gradeLevel: activeTab,
         className: selectedStudent.className,
-        guardianName: selectedStudent.guardians[0]?.name || '—',
-        guardianPhone: selectedStudent.guardians[0]?.phone || '—',
-        registrationFee: currentFeeStructure.registrationFee,
-        examFee: currentFeeStructure.examFee,
+        guardianName: selectedStudent.guardians?.[0]?.name || '—',
+        guardianPhone: selectedStudent.guardians?.[0]?.phone || '—',
+        registrationFee: regFee,
+        examFee: examFee,
         totalFee,
         paidAmount: 0,
         remainingAmount: totalFee,
@@ -231,8 +242,13 @@ export default function RegistrationsPage() {
   const total = registrations.length;
   const admitted = registrations.filter((r) => r.status !== 'pending').length;
   const feesPaid = registrations.filter((r) => r.feeStatus === 'paid').length;
+  const feesUnpaid = registrations.filter((r) => r.feeStatus === 'pending').length;
+  const feesPartial = registrations.filter((r) => r.feeStatus === 'partial').length;
   const pending = registrations.filter((r) => r.status === 'pending').length;
   const totalRevenue = registrations.reduce((s, r) => s + r.paidAmount, 0);
+  const totalBilled = registrations.reduce((s, r) => s + r.totalFee, 0);
+  const totalRemaining = totalBilled - totalRevenue;
+  const collectionRate = totalBilled > 0 ? Math.round((totalRevenue / totalBilled) * 100) : 0;
 
   const columns: Column<GradeRegistration>[] = [
     {
@@ -405,17 +421,106 @@ export default function RegistrationsPage() {
             </div>
           </CardContent>
         </Card>
-      ) : (
-        <Card className="border border-amber-200 bg-amber-50 shadow-none">
-          <CardContent className="p-4 flex items-center gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-800">Fee structure not configured for Grade {activeTab}</p>
-              <p className="text-xs text-amber-700">Go to Settings → Fee Structure to configure fees for Grade {activeTab}.</p>
+      ) : null}
+
+      {/* Fee Analysis Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Registration Fee Analysis */}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                <CreditCard className="h-4 w-4 text-blue-600" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800">Registration Fees</div>
+                <div className="text-[11px] text-slate-400">Grade {activeTab} collection status</div>
+              </div>
+            </div>
+            <div className="space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Total Students:</span>
+                <span className="font-bold text-slate-800">{total}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Fully Paid:</span>
+                <span className="font-bold text-emerald-700">{feesPaid} students</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Partial:</span>
+                <span className="font-semibold text-blue-600">{feesPartial} students</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Unpaid:</span>
+                <span className="font-semibold text-red-600">{feesUnpaid} students</span>
+              </div>
+              <div className="border-t border-slate-100 pt-2 mt-2 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Billed:</span>
+                  <span className="font-bold">{formatCurrency(totalBilled)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Collected:</span>
+                  <span className="font-bold text-emerald-700">{formatCurrency(totalRevenue)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Remaining:</span>
+                  <span className="font-bold text-red-600">{formatCurrency(totalRemaining)}</span>
+                </div>
+              </div>
+              <div className="pt-1">
+                <div className="flex justify-between mb-1">
+                  <span className="text-slate-500">Collection Rate</span>
+                  <span className="font-bold text-blue-700">{collectionRate}%</span>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                    style={{ width: `${collectionRate}%` }}
+                  />
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>
-      )}
+
+        {/* Admission Status Analysis */}
+        <Card className="border border-slate-200 shadow-sm">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="h-8 w-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                <Award className="h-4 w-4 text-indigo-600" />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-slate-800">Admission Progress</div>
+                <div className="text-[11px] text-slate-400">Grade {activeTab} admission status</div>
+              </div>
+            </div>
+            <div className="space-y-2 text-xs">
+              {[
+                { label: 'Pending', count: registrations.filter(r => r.status === 'pending').length, color: 'bg-amber-400' },
+                { label: 'Admission Sent', count: registrations.filter(r => r.status === 'admission_sent').length, color: 'bg-indigo-500' },
+                { label: 'Registered', count: registrations.filter(r => r.status === 'registered').length, color: 'bg-violet-500' },
+                { label: 'Fees Paid', count: registrations.filter(r => r.status === 'fees_paid').length, color: 'bg-blue-500' },
+                { label: 'Completed', count: registrations.filter(r => r.status === 'completed').length, color: 'bg-emerald-500' },
+              ].map(({ label, count, color }) => (
+                <div key={label}>
+                  <div className="flex justify-between mb-0.5">
+                    <span className="text-slate-600">{label}</span>
+                    <span className="font-bold text-slate-800">{count}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${color} rounded-full transition-all duration-700`}
+                      style={{ width: `${total > 0 ? (count / total) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -532,19 +637,31 @@ export default function RegistrationsPage() {
                     ))}
                   </div>
 
-                  {currentFeeStructure && selectedStudent && (
-                    <div className="bg-blue-50 rounded-xl p-4 text-sm space-y-1">
-                      <div className="flex justify-between text-slate-600">
-                        <span>Registration Fee:</span>
-                        <span className="font-semibold">{formatCurrency(currentFeeStructure.registrationFee)}</span>
+                  {selectedStudent && (
+                    <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 text-sm space-y-3">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700">Registration Fee (PKR)</label>
+                          <Input
+                            type="number"
+                            value={manualRegFee}
+                            onChange={(e) => setManualRegFee(Number(e.target.value))}
+                            className="bg-white border-slate-200 h-9"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-slate-700">Admission Fee (PKR)</label>
+                          <Input
+                            type="number"
+                            value={manualAdmissionFee}
+                            onChange={(e) => setManualAdmissionFee(Number(e.target.value))}
+                            className="bg-white border-slate-200 h-9"
+                          />
+                        </div>
                       </div>
-                      <div className="flex justify-between text-slate-600">
-                        <span>Exam Fee:</span>
-                        <span className="font-semibold">{formatCurrency(currentFeeStructure.examFee)}</span>
-                      </div>
-                      <div className="flex justify-between font-bold text-slate-800 border-t border-blue-100 pt-1 mt-1">
-                        <span>Total Due:</span>
-                        <span className="text-blue-700">{formatCurrency(currentFeeStructure.registrationFee + currentFeeStructure.examFee)}</span>
+                      <div className="flex justify-between font-bold text-slate-800 border-t border-blue-100 pt-2 mt-2">
+                        <span>Total Assigned Fee:</span>
+                        <span className="text-blue-700">{formatCurrency(manualRegFee + manualAdmissionFee)}</span>
                       </div>
                     </div>
                   )}
@@ -607,7 +724,7 @@ export default function RegistrationsPage() {
                   <span className="font-semibold">{formatCurrency(cardTarget.registrationFee)}</span>
                 </div>
                 <div className="flex justify-between text-sm mt-1">
-                  <span className="text-slate-500">Exam Fee:</span>
+                  <span className="text-slate-500">Admission Fee:</span>
                   <span className="font-semibold">{formatCurrency(cardTarget.examFee)}</span>
                 </div>
                 <div className="flex justify-between text-sm mt-1 font-bold text-slate-800">
@@ -661,7 +778,7 @@ export default function RegistrationsPage() {
                   <span className="font-semibold">{formatCurrency(payTarget.registrationFee)}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Exam Fee:</span>
+                  <span className="text-slate-500">Admission Fee:</span>
                   <span className="font-semibold">{formatCurrency(payTarget.examFee)}</span>
                 </div>
                 <div className="flex justify-between">

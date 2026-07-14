@@ -4,7 +4,7 @@
 
 import {
   collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
-  query, orderBy, serverTimestamp, Timestamp,
+  query, orderBy, serverTimestamp, Timestamp, where, writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Student } from '@/types';
@@ -96,21 +96,78 @@ export async function updateStudent(
   const updated = await getStudentById(id);
   const finalStudent = updated || { ...studentData, id, updatedAt: new Date() } as Student;
 
-  // If the owner added / updated fee entries, regenerate invoices for any new entries.
-  if (studentData.feeEntries && studentData.feeEntries.length > 0) {
-    try {
-      await assignCustomFeesForStudent(finalStudent);
-    } catch (err) {
-      console.warn('Custom fee update assignment failed:', err);
-    }
-  }
-
   return finalStudent;
 }
 
 export async function deleteStudent(id: string, deleterId: string): Promise<void> {
   await deleteDoc(doc(db, 'students', id));
   await logActivity(deleterId, 'Deleted student record', `Student profile ${id} was removed.`);
+}
+
+// ── Class Promotion ────────────────────────────────────────────────────────
+
+export async function promoteStudents(
+  fromClassName: string,
+  toClassName: string,
+  toSection: string,
+  promoterId: string,
+  promoterName: string,
+  academicYear: string,
+  notes?: string,
+): Promise<{ promotedCount: number }> {
+  // Fetch all active students in the source class
+  const q = query(
+    collection(db, 'students'),
+    where('className', '==', fromClassName),
+    where('status', '==', 'active'),
+  );
+  const snap = await getDocs(q);
+  const students = snap.docs.map((d) => ({ id: d.id, ...d.data() })) as Student[];
+
+  if (students.length === 0) return { promotedCount: 0 };
+
+  // Batch update all students
+  const batch = writeBatch(db);
+  const studentIds: string[] = [];
+
+  students.forEach((s) => {
+    const ref = doc(db, 'students', s.id);
+    batch.update(ref, {
+      className: toClassName,
+      section: toSection,
+      updatedAt: serverTimestamp(),
+    });
+    studentIds.push(s.id);
+  });
+
+  // Save promotion log
+  const logId = 'promo-' + Math.random().toString(36).substring(2, 9);
+  const logRef = doc(db, 'promotionLogs', logId);
+  batch.set(logRef, {
+    id: logId,
+    fromClass: fromClassName,
+    toClass: toClassName,
+    fromSection: students[0]?.section || '',
+    toSection,
+    studentIds,
+    studentCount: students.length,
+    promotedBy: promoterId,
+    promotedByName: promoterName,
+    academicYear,
+    notes: notes || '',
+    promotedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+
+  // Activity log
+  await logActivity(
+    promoterId,
+    'Class Promotion',
+    `Promoted ${students.length} students from ${fromClassName} to ${toClassName} for ${academicYear}`,
+  );
+
+  return { promotedCount: students.length };
 }
 
 // ── Activity Log Helper ───────────────────────────────────────────────────────

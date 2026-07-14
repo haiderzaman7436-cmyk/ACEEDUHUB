@@ -8,17 +8,23 @@ import { UnauthorizedPage } from '@/features/auth/UnauthorizedPage';
 // Lazy load feature pages
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'));
 const StudentsPage = lazy(() => import('@/features/students/StudentsPage'));
+const AcademyStudentsPage = lazy(() => import('@/features/academy/AcademyStudentsPage'));
 const TeachersPage = lazy(() => import('@/features/teachers/TeachersPage'));
 
 const FeesPage = lazy(() => import('@/features/fees/FeesPage'));
 const InvoicesPage = lazy(() => import('@/features/invoices/InvoicesPage'));
+
+const InventoryDashboardPage = lazy(() => import('@/features/inventory/InventoryDashboardPage'));
 const StationeryPage = lazy(() => import('@/features/inventory/StationeryPage'));
 const UniformsPage = lazy(() => import('@/features/inventory/UniformsPage'));
 const BooksPage = lazy(() => import('@/features/inventory/BooksPage'));
+
 const RegistrationsPage = lazy(() => import('@/features/registrations/RegistrationsPage'));
+const ExamsPage = lazy(() => import('@/features/exams/ExamsPage'));
 const ReportsPage = lazy(() => import('@/features/reports/ReportsPage'));
 const FinancePage = lazy(() => import('@/features/finance/FinancePage'));
 const SettingsPage = lazy(() => import('@/features/settings/SettingsPage'));
+const ExpensesPage = lazy(() => import('@/features/expenses/ExpensesPage'));
 
 // Loader placeholder
 const Loader = () => (
@@ -64,11 +70,21 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
+      // School Students
       {
         path: 'students',
         element: (
           <Suspense fallback={<Loader />}>
             <StudentsPage />
+          </Suspense>
+        ),
+      },
+      // Academy Students — Separate module
+      {
+        path: 'academy-students',
+        element: (
+          <Suspense fallback={<Loader />}>
+            <AcademyStudentsPage />
           </Suspense>
         ),
       },
@@ -81,6 +97,7 @@ export const router = createBrowserRouter([
         ),
       },
 
+      // Fees
       {
         path: 'fees',
         element: (
@@ -89,12 +106,25 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
+      // Invoices
       {
         path: 'invoices',
         element: (
           <Suspense fallback={<Loader />}>
             <InvoicesPage />
           </Suspense>
+        ),
+      },
+
+      // Inventory — Dashboard overview
+      {
+        path: 'inventory',
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+            <Suspense fallback={<Loader />}>
+              <InventoryDashboardPage />
+            </Suspense>
+          </ProtectedRoute>
         ),
       },
       // Inventory sub-routes
@@ -122,6 +152,8 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
+
+      // Registrations
       {
         path: 'registrations',
         element: (
@@ -130,20 +162,45 @@ export const router = createBrowserRouter([
           </Suspense>
         ),
       },
+
+      // Exams — NEW
+      {
+        path: 'exams',
+        element: (
+          <Suspense fallback={<Loader />}>
+            <ExamsPage />
+          </Suspense>
+        ),
+      },
+
       {
         path: 'reports',
         element: (
-          <Suspense fallback={<Loader />}>
-            <ReportsPage />
-          </Suspense>
+          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+            <Suspense fallback={<Loader />}>
+              <ReportsPage />
+            </Suspense>
+          </ProtectedRoute>
         ),
       },
       {
         path: 'finance',
         element: (
-          <Suspense fallback={<Loader />}>
-            <FinancePage />
-          </Suspense>
+          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+            <Suspense fallback={<Loader />}>
+              <FinancePage />
+            </Suspense>
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'expenses',
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'manager', 'data_operator']}>
+            <Suspense fallback={<Loader />}>
+              <ExpensesPage />
+            </Suspense>
+          </ProtectedRoute>
         ),
       },
       // Admin-only Settings routes

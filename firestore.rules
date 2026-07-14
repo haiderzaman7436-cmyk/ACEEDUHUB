@@ -69,9 +69,30 @@ service cloud.firestore {
     match /books/{docId} {
       allow read, write: if isAuth();
     }
+    match /inventorySales/{docId} {
+      allow read, write: if isAuth();
+    }
 
     // ── Activity Logs ─────────────────────────────────────────────────────────
     match /activityLogs/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Expenses ──────────────────────────────────────────────────────────────
+    match /expenses/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Exams ─────────────────────────────────────────────────────────────────
+    match /examSessions/{docId} {
+      allow read, write: if isAuth();
+    }
+    match /examResults/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Promotion Logs ────────────────────────────────────────────────────────
+    match /promotionLogs/{docId} {
       allow read, write: if isAuth();
     }
   }

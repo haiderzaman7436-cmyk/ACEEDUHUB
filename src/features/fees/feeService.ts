@@ -82,6 +82,44 @@ export async function updateFeeTemplate(id: string, data: Partial<FeeTemplate>):
   });
 }
 
+// ── Bulk Monthly Fee Generation ─────────────────────────────────────────────
+
+export async function generateMonthlyFeesForAll(): Promise<{ success: number; skipped: number }> {
+  const monthLabel = getMonthLabel();
+  const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
+  const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+  
+  if (students.length === 0) return { success: 0, skipped: 0 };
+  
+  let successCount = 0;
+  let skipCount = 0;
+
+  for (const student of students) {
+    // Check if this student already has a fee for this month (avoid duplicates)
+    const existingFeesQ = query(
+      collection(db, 'fees'), 
+      where('studentId', '==', student.id),
+      where('month', '==', monthLabel)
+    );
+    const existingSnap = await getDocs(existingFeesQ);
+    if (!existingSnap.empty) {
+      skipCount++;
+      continue;
+    }
+
+    // Try assigning default template fees
+    const templates = await getFeeTemplateForClass(student.className);
+    if (templates.length > 0) {
+      await assignFeesForNewStudent(student); // Re-uses the assignment logic
+      successCount++;
+    } else {
+      skipCount++;
+    }
+  }
+
+  return { success: successCount, skipped: skipCount };
+}
+
 // ── Auto-assign fees when a student is enrolled ──────────────────────────────
 
 export async function assignFeesForNewStudent(student: Student): Promise<void> {
@@ -296,19 +334,51 @@ export async function getFees(): Promise<Fee[]> {
   })) as Fee[];
 }
 
-export async function getFeesByStudent(studentId: string): Promise<Fee[]> {
+export async function getFeesByMonth(monthLabel: string): Promise<Fee[]> {
   const q = query(
     collection(db, 'fees'),
-    where('studentId', '==', studentId),
-    orderBy('createdAt', 'desc'),
+    where('month', '==', monthLabel),
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
+  const results = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
   })) as Fee[];
+  return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export async function getAvailableFeeMonths(): Promise<string[]> {
+  // Fetch all fees and extract unique months (client-side distinct)
+  const snap = await getDocs(collection(db, 'fees'));
+  const months = new Set<string>();
+  snap.docs.forEach((d) => {
+    const m = d.data().month;
+    if (m) months.add(m);
+  });
+  // Sort months chronologically
+  return Array.from(months).sort((a, b) => {
+    const dateA = new Date(a);
+    const dateB = new Date(b);
+    return dateB.getTime() - dateA.getTime();
+  });
+}
+
+export async function getFeesByStudent(studentId: string): Promise<Fee[]> {
+  const q = query(
+    collection(db, 'fees'),
+    where('studentId', '==', studentId),
+  );
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+    createdAt: toDate(d.data().createdAt),
+    updatedAt: toDate(d.data().updatedAt),
+  })) as Fee[];
+  // Sort client-side by createdAt descending
+  return items.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
 }
 
 export async function addFee(feeData: Omit<Fee, 'id' | 'createdAt' | 'updatedAt'>): Promise<Fee> {
@@ -396,16 +466,16 @@ export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]
   const q = query(
     collection(db, 'invoices'),
     where('studentId', '==', studentId),
-    orderBy('createdAt', 'desc'),
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
+  const items = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
     paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
   })) as Invoice[];
+  return items.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
 }
 
 export async function createInvoice(
