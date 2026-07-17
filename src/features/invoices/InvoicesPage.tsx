@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Eye, X, CreditCard, Loader2, CheckCircle2, RefreshCw,
-  Landmark, Receipt, Banknote, CalendarDays,
+  Landmark, Receipt, Banknote, CalendarDays, Printer,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthContext';
 import { BankInvoicePrint } from '@/features/fees/BankInvoicePrint';
+import logoImg from '@/assets/logo.jpeg';
 
 function getCurrentMonthLabel(): string {
   return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -74,6 +75,109 @@ export default function InvoicesPage() {
   const handlePreviewClick = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setIsPreviewOpen(true);
+  };
+
+  const handlePrintInvoice = (inv: Invoice) => {
+    const w = window.open('', '_blank', 'width=850,height=1100');
+    if (!w) return;
+    const logoUrl = window.location.origin + '/logo.jpeg';
+    const itemRows = inv.items.map((item, i) => `
+      <tr style="background:${i % 2 === 0 ? '#fff' : '#f8faff'}">
+        <td style="padding:8px 12px;border:1px solid #e2e8f0">${item.description}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;text-align:center">${item.quantity}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;text-align:right">Rs ${item.unitPrice.toLocaleString()}</td>
+        <td style="padding:8px 12px;border:1px solid #e2e8f0;text-align:right;font-weight:700">Rs ${item.total.toLocaleString()}</td>
+      </tr>`).join('');
+    const balance = inv.grandTotal - (inv.paidAmount || 0);
+    w.document.write(`
+      <html>
+        <head>
+          <title>Invoice ${inv.invoiceNumber} — ${inv.studentName}</title>
+          <style>
+            * { margin:0; padding:0; box-sizing:border-box; }
+            body { font-family: Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 28px; }
+            .header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1d4ed8; padding-bottom:16px; margin-bottom:16px; }
+            .logo-block { display:flex; align-items:center; gap:12px; }
+            .logo-img { width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid #1d4ed8; }
+            .school-name { font-size:20px; font-weight:900; color:#1e3a8a; }
+            .school-sub { font-size:10px; color:#64748b; margin-top:2px; }
+            .badge { background:#1d4ed8; color:white; padding:4px 14px; border-radius:6px; font-size:11px; font-weight:700; letter-spacing:1px; }
+            .inv-no { font-size:15px; font-weight:900; color:#1e3a8a; margin-top:4px; }
+            .inv-status { font-size:11px; color:#64748b; margin-top:2px; }
+            .inv-status span { font-weight:700; color:#059669; text-transform:uppercase; }
+            .bill-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+            .bill-box h4 { font-size:9px; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+            .bill-box .name { font-size:15px; font-weight:900; color:#0f172a; }
+            .bill-box .sub { font-size:11px; color:#475569; margin-top:2px; }
+            .bill-box-right { text-align:right; }
+            table { width:100%; border-collapse:collapse; margin-bottom:14px; }
+            thead tr { background:#e0e7ff; }
+            th { padding:8px 12px; border:1px solid #c7d2fe; font-size:9.5px; font-weight:700; color:#1e3a8a; text-transform:uppercase; }
+            .totals { display:flex; justify-content:flex-end; margin-bottom:20px; }
+            .totals-box { width:240px; border:1px solid #e2e8f0; border-radius:8px; padding:12px; }
+            .totals-row { display:flex; justify-content:space-between; font-size:11.5px; padding:3px 0; color:#475569; }
+            .totals-row.bold { font-size:13px; font-weight:800; color:#0f172a; border-top:1px solid #e2e8f0; padding-top:8px; margin-top:6px; }
+            .totals-row.bold span:last-child { color:#1d4ed8; }
+            .footer { text-align:center; font-size:9px; color:#94a3b8; border-top:1px dashed #e2e8f0; padding-top:12px; }
+            .footer strong { color:#64748b; display:block; margin-bottom:2px; }
+            @media print { body { padding:16px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="logo-block">
+              <img src="${logoUrl}" alt="Logo" class="logo-img" />
+              <div>
+                <div class="school-name">${APP_NAME}</div>
+                <div class="school-sub">Gondlanwala road, Galla Shazi Hospital wala</div>
+                <div class="school-sub">info@ace.edu.pk</div>
+              </div>
+            </div>
+            <div style="text-align:right">
+              <div class="badge">OFFICIAL INVOICE</div>
+              <div class="inv-no">${inv.invoiceNumber}</div>
+              <div class="inv-status">Status: <span>${inv.status}</span></div>
+            </div>
+          </div>
+          <div class="bill-grid">
+            <div class="bill-box">
+              <h4>Bill To</h4>
+              <div class="name">${inv.studentName}</div>
+              <div class="sub">Class: ${inv.className} — Sec ${inv.section}</div>
+              ${inv.month ? `<div class="sub">Billing Period: ${inv.month}</div>` : ''}
+            </div>
+            <div class="bill-box bill-box-right">
+              <h4>Invoice Details</h4>
+              <div class="sub">Issued: <strong>${new Date(inv.createdAt).toLocaleDateString()}</strong></div>
+              <div class="sub" style="color:#dc2626">Due: <strong>${formatDate(inv.dueDate)}</strong></div>
+            </div>
+          </div>
+          <table>
+            <thead><tr>
+              <th style="text-align:left">Fee Description</th>
+              <th style="text-align:center">Qty</th>
+              <th style="text-align:right">Unit Price</th>
+              <th style="text-align:right">Total</th>
+            </tr></thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+          <div class="totals">
+            <div class="totals-box">
+              <div class="totals-row"><span>Subtotal</span><span>Rs ${inv.subtotal.toLocaleString()}</span></div>
+              ${inv.discount > 0 ? `<div class="totals-row" style="color:#059669"><span>Discount</span><span>− Rs ${inv.discount.toLocaleString()}</span></div>` : ''}
+              ${(inv.paidAmount || 0) > 0 ? `<div class="totals-row" style="color:#059669"><span>Amount Paid</span><span>− Rs ${(inv.paidAmount || 0).toLocaleString()}</span></div>` : ''}
+              <div class="totals-row bold"><span>Balance Due</span><span>Rs ${balance.toLocaleString()}</span></div>
+            </div>
+          </div>
+          <div class="footer">
+            <strong>★ ${APP_NAME.toUpperCase()} — DIGITAL RECORD SYSTEM ★</strong>
+            Computer-generated invoice. This is an official document.
+          </div>
+        </body>
+      </html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); }, 400);
   };
 
   const handleChallanClick = async (inv: Invoice) => {
@@ -231,16 +335,17 @@ export default function InvoicesPage() {
             <Eye className="h-4 w-4" />
           </Button>
 
-          {/* Bank Challan 3-copy — ONLY print option */}
+          {/* Fee Challan 3-copy */}
           <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+            size="sm"
+            variant="outline"
+            className="h-8 gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-600 hover:text-white font-semibold"
             onClick={() => handleChallanClick(item)}
-            title="Print Bank Challan (3 Copies)"
+            title="Print Fee Challan (Student / Accounts / Office)"
             disabled={isLoadingChallan}
           >
-            {isLoadingChallan ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
+            {isLoadingChallan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Banknote className="h-3.5 w-3.5" />}
+            Challan
           </Button>
 
           {/* Pay */}
@@ -364,43 +469,60 @@ export default function InvoicesPage() {
 
       {/* Invoice Preview Modal */}
       {isPreviewOpen && selectedInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsPreviewOpen(false)} />
-          <Card className="relative w-full max-w-2xl max-h-[90vh] flex flex-col z-10 animate-scale-in overflow-hidden shadow-2xl">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between bg-slate-50 border-b border-slate-200 p-5">
-              <div>
-                <h2 className="font-bold text-slate-800 text-base">Invoice Details</h2>
-                <p className="text-xs text-slate-400">{selectedInvoice.invoiceNumber}</p>
+        <>
+          {/* Fixed full-screen backdrop */}
+          <div
+            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsPreviewOpen(false)}
+          />
+          {/* Fixed modal card — toolbar never scrolls, body scrolls independently */}
+          <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-10 pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-2xl max-h-[88vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden animate-scale-in bg-white">
+              {/* Toolbar — flex-shrink-0 so it NEVER scrolls away */}
+              <div className="flex-shrink-0 flex items-center justify-between bg-blue-800 px-5 py-3 rounded-t-2xl">
+                <div>
+                  <h2 className="font-bold text-white text-base">Invoice Details</h2>
+                  <p className="text-xs text-blue-200">{selectedInvoice.invoiceNumber}</p>
+                </div>
+                <div className="flex items-center gap-3 flex-wrap justify-end">
+                  <Button
+                    size="sm"
+                    onClick={() => handlePrintInvoice(selectedInvoice)}
+                    className="h-9 px-4 gap-1.5 text-sm bg-amber-400 hover:bg-amber-500 text-slate-900 font-extrabold shadow-lg rounded-lg"
+                  >
+                    <Printer className="h-4 w-4" />
+                    Print Invoice
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => { setIsPreviewOpen(false); handleChallanClick(selectedInvoice); }}
+                    className="h-9 px-4 gap-1.5 text-sm bg-white text-blue-800 font-extrabold hover:bg-blue-50 shadow-lg rounded-lg"
+                  >
+                    <Banknote className="h-4 w-4" />
+                    Print Challan
+                  </Button>
+                  <button onClick={() => setIsPreviewOpen(false)} className="ml-1 text-white/60 hover:text-white transition-colors">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => { setIsPreviewOpen(false); handleChallanClick(selectedInvoice); }}
-                  className="h-8 gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
-                >
-                  <Banknote className="h-3.5 w-3.5" />
-                  Print 3-Copy Challan
-                </Button>
-                <button onClick={() => setIsPreviewOpen(false)} className="text-slate-400 hover:text-slate-600">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
 
-            {/* Invoice Content Area */}
-            <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white text-slate-800">
+              {/* Scrollable invoice body */}
+              <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white text-slate-800">
               {/* Header */}
               <div className="flex justify-between items-start">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="h-9 w-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0">
-                      <Landmark className="h-5 w-5" />
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="h-14 w-14 rounded-full overflow-hidden border-2 border-blue-200 shadow-md shrink-0">
+                      <img src={logoImg} alt="ACE Logo" className="h-full w-full object-cover" />
                     </div>
-                    <h2 className="text-2xl font-black text-blue-700 tracking-tight">{APP_NAME}</h2>
+                    <div>
+                      <h2 className="text-xl font-black text-blue-700 tracking-tight">{APP_NAME}</h2>
+                      <p className="text-[11px] text-slate-500 font-medium">The School of Science &amp; Arts</p>
+                    </div>
                   </div>
                   <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                    DHA Phase 6 Campus, Karachi, Pakistan<br />
+                    Gondlanwala road, Galla DR Shazia wala<br />
                     Phone: 03001234567 | info@ace.edu.pk | Category: <span className="font-bold uppercase text-blue-600">{selectedInvoice.category || 'school'}</span>
                   </p>
                 </div>
@@ -481,11 +603,13 @@ export default function InvoicesPage() {
               {/* Footer note */}
               <div className="text-center text-[9px] text-slate-400 border-t border-dashed border-slate-200 pt-4">
                 <p className="font-semibold text-slate-500">★ {APP_NAME.toUpperCase()} — DIGITAL RECORD SYSTEM ★</p>
-                <p>Computer-generated invoice. Use "Print 3-Copy Challan" to print the official bank deposit slip.</p>
+                <p>Computer-generated invoice. Use the print buttons above to print.</p>
               </div>
-            </div>
-          </Card>
-        </div>
+
+            </div>{/* end scrollable body */}
+            </div>{/* end modal card */}
+          </div>{/* end fixed wrapper */}
+        </>
       )}
 
       {/* Filter / Summary Toolbar */}

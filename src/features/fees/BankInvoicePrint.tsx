@@ -1,13 +1,13 @@
 // ============================================================================
-// ACE Educational Hub — Three-Copy Bank Invoice / Challan (Printable)
-// Matches image: Bank Copy | Student Copy | Institute Copy — on one A4 page
+// ACE Educational Hub — Three-Copy Fee Challan
+// Student Copy | Accounts Copy | Office Copy — all on one A4 page
 // ============================================================================
 
 import { useRef } from 'react';
 import { Printer, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import type { Invoice, Student } from '@/types';
 import { APP_NAME } from '@/lib/constants';
+import logoImg from '@/assets/logo.jpeg';
 
 interface BankInvoicePrintProps {
   invoice: Invoice;
@@ -15,17 +15,20 @@ interface BankInvoicePrintProps {
   onClose: () => void;
 }
 
+const SCHOOL_ADDRESS = 'Gondlanwala road, Galla DR Shazia wala';
+const SCHOOL_PHONE   = '+92-346-0204447';
+
 const FEE_ROWS_BANK = [
-  { key: 'MONTHLY FEE', searchKey: 'MONTHLY' },
-  { key: 'ADMISSION FEE', searchKey: 'ADMISSION' },
-  { key: 'REGISTRATION FEE', searchKey: 'REGISTRATION' },
-  { key: 'ART MATERIAL', searchKey: 'ART' },
-  { key: 'TRANSPORT', searchKey: 'TRANSPORT' },
-  { key: 'BOOKS', searchKey: 'BOOK' },
-  { key: 'UNIFORM', searchKey: 'UNIFORM' },
-  { key: 'FINE', searchKey: 'FINE' },
-  { key: 'OTHERS', searchKey: 'OTHER' },
-  { key: 'PREVIOUS BALANCE', searchKey: 'PREVIOUS' },
+  { key: 'Monthly Fee',       searchKey: 'MONTHLY'      },
+  { key: 'Admission Fee',     searchKey: 'ADMISSION'    },
+  { key: 'Registration Fee',  searchKey: 'REGISTRATION' },
+  { key: 'Art Material',      searchKey: 'ART'          },
+  { key: 'Transport Fee',     searchKey: 'TRANSPORT'    },
+  { key: 'Books',             searchKey: 'BOOK'         },
+  { key: 'Uniform',           searchKey: 'UNIFORM'      },
+  { key: 'Fine / Late Fee',   searchKey: 'FINE'         },
+  { key: 'Others',            searchKey: 'OTHER'        },
+  { key: 'Previous Balance',  searchKey: 'PREVIOUS'     },
 ];
 
 function getRowAmount(items: Invoice['items'], searchKey: string): number {
@@ -33,215 +36,329 @@ function getRowAmount(items: Invoice['items'], searchKey: string): number {
   return match ? match.total : 0;
 }
 
-const COPIES = ['Bank Copy', 'Student Copy', 'Institute Copy'];
+// Three copies — distinct labels + accent colours
+const COPIES: { label: string; accent: string; badgeBg: string; badgeText: string }[] = [
+  { label: 'Student Copy',  accent: '#1d4ed8', badgeBg: '#dbeafe', badgeText: '#1e3a8a' },
+  { label: 'Accounts Copy', accent: '#059669', badgeBg: '#d1fae5', badgeText: '#065f46' },
+  { label: 'Office Copy',   accent: '#7c3aed', badgeBg: '#ede9fe', badgeText: '#4c1d95' },
+];
 
 export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrintProps) {
   const printRef = useRef<HTMLDivElement>(null);
-  const guardian = student.guardians?.[0];
-  const total = invoice.grandTotal;
-  const discount = invoice.discount || 0;
-  const discountLabel = discount > 0 ? `DISCOUNT IN FEE ${discount}` : 'DISCOUNT IN FEE 0';
+  const guardian  = student.guardians?.[0];
+  const total     = invoice.grandTotal;
+  const paid      = invoice.paidAmount || 0;
+  const balance   = Math.max(0, total - paid);
+  const discount  = invoice.discount || 0;
 
+  const dateStr    = new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+  const dueDateStr = new Date(invoice.dueDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  // Derive fee month from invoice.month or fall back to the due-date month
+  const feeMonth = invoice.month ||
+    new Date(invoice.dueDate).toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
+
+  // ── Print handler ─────────────────────────────────────────────────────────
   const handlePrint = () => {
     const content = printRef.current;
     if (!content) return;
-    const w = window.open('', '_blank', 'width=850,height=1100');
+    const w = window.open('', '_blank', 'width=850,height=1150');
     if (!w) return;
+    const logoUrl = window.location.origin + '/logo.jpeg';
+
     w.document.write(`
       <html>
         <head>
-          <title>Bank Challan — ${student.firstName} ${student.lastName}</title>
+          <title>Fee Challan — ${student.firstName} ${student.lastName}</title>
           <style>
+            @page { size: A4 portrait; margin: 5mm 7mm; }
             * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family: Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 16px; }
-            .challan { border: 2px solid #1d4ed8; border-radius: 8px; margin-bottom: 12px; padding: 10px; page-break-inside: avoid; }
-            .challan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-            .school-left { flex: 1; }
-            .school-name { font-size: 16px; font-weight: 900; color: #1e3a8a; }
-            .school-sub { font-size: 10px; color: #475569; }
-            .bank-right { text-align: right; }
-            .bank-name { font-size: 13px; font-weight: 800; color: #1e3a8a; }
-            .bank-sub { font-size: 9px; color: #64748b; }
-            .info-table { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-size: 10.5px; margin-bottom: 8px; }
-            .info-row { display: flex; gap: 4px; }
-            .info-label { color: #64748b; white-space: nowrap; }
-            .info-value { font-weight: 700; color: #1e3a8a; }
-            .copy-badge { display: inline-block; background: #dbeafe; border: 1px solid #93c5fd; color: #1e3a8a; font-weight: 700; font-size: 10px; padding: 2px 8px; border-radius: 4px; margin-bottom: 6px; }
-            .bank-details { background: #f8faff; border: 1px solid #c7d2fe; border-radius: 4px; padding: 6px 8px; font-size: 10px; margin-bottom: 8px; }
-            .bank-details-title { font-weight: 700; font-size: 10.5px; color: #1e3a8a; margin-bottom: 3px; }
-            .barcode { font-family: 'Courier New', monospace; font-size: 16px; letter-spacing: 2px; color: #1a1a1a; margin: 4px 0; }
-            .instruction { font-size: 9px; color: #64748b; font-style: italic; border-top: 1px dashed #e2e8f0; padding-top: 4px; margin-top: 4px; }
-            .fee-table { border-collapse: collapse; font-size: 10.5px; }
-            .fee-table th, .fee-table td { border: 1px solid #e2e8f0; padding: 3px 6px; }
-            .fee-table thead tr { background: #e0e7ff; }
-            .fee-table th { font-size: 9.5px; color: #1e3a8a; font-weight: 700; }
-            .total-row td { font-weight: 800; background: #dbeafe; color: #1e3a8a; }
-            .payable-row td { font-weight: 800; color: #dc2626; background: #fff1f2; }
-            .body-grid { display: flex; gap: 12px; align-items: flex-start; }
-            .left-col { flex: 1; }
-            .right-col { min-width: 200px; }
+            body { font-family: Arial, sans-serif; font-size: 9px; color: #1a1a1a; }
+            img  { display:block; }
+
+            .challan { border:1.5px solid #1d4ed8; border-radius:5px; padding:7px 9px; margin-bottom:0; }
+
+            /* Scissor cut-line separator between copies */
+            .cut-line {
+              display: flex;
+              align-items: center;
+              margin: 6px 0;
+              gap: 6px;
+              color: #94a3b8;
+              font-size: 13px;
+            }
+            .cut-line::before, .cut-line::after {
+              content: '';
+              flex: 1;
+              border-top: 1.5px dashed #94a3b8;
+            }
+            .cut-icon { font-size: 13px; transform: rotate(-90deg); user-select: none; }
+
+            /* Top header */
+            .ch-head { display:flex; justify-content:space-between; align-items:center;
+                        border-bottom:1.5px solid #c7d2fe; padding-bottom:5px; margin-bottom:5px; }
+            .logo-block { display:flex; align-items:center; gap:7px; }
+            .logo-img   { width:34px; height:34px; border-radius:50%; object-fit:cover; border:2px solid #1d4ed8; }
+            .school-name{ font-size:13px; font-weight:900; color:#1e3a8a; line-height:1.2; }
+            .school-sub { font-size:7.5px; color:#475569; }
+            .copy-stamp { font-size:10px; font-weight:900; padding:3px 10px; border-radius:4px;
+                          border:1.5px solid; display:inline-block; }
+
+            /* Body: info + fee table */
+            .ch-body { display:flex; gap:8px; }
+
+            /* Student info */
+            .info-col { flex:1; }
+            .info-row { display:flex; margin-bottom:2px; font-size:8.5px; }
+            .info-lbl { color:#64748b; min-width:78px; }
+            .info-val { font-weight:700; color:#1e3a8a; }
+
+            /* Fee table */
+            .fee-col { min-width:185px; }
+            table   { border-collapse:collapse; width:100%; }
+            th, td  { border:1px solid #e2e8f0; padding:2px 5px; font-size:8px; }
+            thead tr{ background:#e0e7ff; }
+            th      { color:#1e3a8a; font-weight:700; }
+
+            /* Summary rows */
+            .row-total  { background:#dbeafe; font-weight:800; color:#1e3a8a; }
+            .row-paid   { background:#d1fae5; font-weight:700; color:#059669; }
+            .row-bal    { background:#fff1f2; font-weight:800; color:#dc2626; }
+
+            /* Signature line */
+            .sig-row { display:flex; justify-content:space-between; margin-top:6px;
+                        border-top:1px dashed #cbd5e1; padding-top:4px; font-size:7.5px; color:#64748b; }
+            .sig-line { border-bottom:1px solid #94a3b8; width:90px; display:inline-block; margin-top:8px; }
           </style>
         </head>
-        <body>${content.innerHTML}</body>
-      </html>
-    `);
+        <body>
+          ${content.innerHTML.replace(/src="[^"]*logo[^"]*"/g, `src="${logoUrl}"`)}
+        </body>
+      </html>`);
     w.document.close();
     w.focus();
     setTimeout(() => { w.print(); }, 400);
   };
 
-  const renderChallan = (copyLabel: string) => (
-    <div
-      key={copyLabel}
-      style={{
-        border: '2px solid #1d4ed8',
-        borderRadius: '8px',
-        marginBottom: '12px',
-        padding: '10px',
-        pageBreakInside: 'avoid',
-      }}
-    >
-      {/* Challan Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', borderBottom: '1px solid #e2e8f0', paddingBottom: '6px' }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '28px', height: '28px', background: '#1d4ed8', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 900, fontSize: '12px', flexShrink: 0 }}>A</div>
+  // ── Single slip ───────────────────────────────────────────────────────────
+  const renderSlip = (copy: typeof COPIES[number]) => {
+    const borderColor = copy.accent;
+
+    return (
+      <div
+        key={copy.label}
+        style={{
+          border: `1.5px solid ${borderColor}`,
+          borderRadius: '5px',
+          padding: '7px 9px',
+          marginBottom: '5px',
+          background: '#fff',
+          pageBreakInside: 'avoid',
+        }}
+      >
+        {/* ── Header ── */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                      borderBottom: `1.5px solid ${copy.badgeBg}`, paddingBottom:'5px', marginBottom:'5px' }}>
+          {/* Logo + School */}
+          <div style={{ display:'flex', alignItems:'center', gap:'7px' }}>
+            <img
+              src={logoImg}
+              alt="Logo"
+              style={{ width:'34px', height:'34px', borderRadius:'50%', objectFit:'cover',
+                       border:`2px solid ${borderColor}`, flexShrink:0 }}
+            />
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 900, color: '#1e3a8a' }}>{APP_NAME}</div>
-              <div style={{ fontSize: '9.5px', color: '#475569' }}>Your target line here</div>
-              <div style={{ fontSize: '9px', color: '#64748b' }}>FLAT 1 Rowan Lodge chester road</div>
+              <div style={{ fontSize:'13px', fontWeight:900, color:'#1e3a8a', lineHeight:1.2 }}>{APP_NAME}</div>
+              <div style={{ fontSize:'7.5px', color:'#475569' }}>The School of Science &amp; Arts</div>
+              <div style={{ fontSize:'7px', color:'#64748b' }}>{SCHOOL_ADDRESS} | {SCHOOL_PHONE}</div>
+            </div>
+          </div>
+          {/* Copy stamp */}
+          <div style={{ textAlign:'right' }}>
+            <div style={{
+              display:'inline-block', fontSize:'10px', fontWeight:900,
+              padding:'3px 12px', borderRadius:'4px',
+              border: `1.5px solid ${borderColor}`,
+              background: copy.badgeBg, color: copy.badgeText,
+            }}>
+              {copy.label}
+            </div>
+            <div style={{ fontSize:'7.5px', color:'#64748b', marginTop:'3px' }}>
+              Invoice: <strong style={{ color:'#1e3a8a' }}>{invoice.invoiceNumber}</strong>
             </div>
           </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '14px', fontWeight: 900, color: '#1e3a8a' }}>Bank Alfalah</div>
-          <div style={{ fontSize: '9px', color: '#64748b' }}>Islamic Banking</div>
-        </div>
-      </div>
 
-      {/* Body: left info + right fee table */}
-      <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
-        {/* Left: Student Info + Copy Badge + Bank Details */}
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2px', fontSize: '10.5px', marginBottom: '8px' }}>
+        {/* ── Body ── */}
+        <div style={{ display:'flex', gap:'8px' }}>
+
+          {/* Student Info */}
+          <div style={{ flex:1 }}>
             {[
-              ['Student ID', student.admissionNumber],
               ['Student Name', `${student.firstName} ${student.lastName}`],
-              ['Father Name', guardian?.name || 'N/A'],
-              ['Class', invoice.className],
-              ['Fee Month', invoice.month || 'Current Month'],
-              ['Date', invoice.paidAt ? new Date(invoice.paidAt).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' }) : new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })],
-              ['Due Date', new Date(invoice.dueDate).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })],
-            ].map(([label, value]) => (
-              <div key={label} style={{ display: 'flex', gap: '4px' }}>
-                <span style={{ color: '#64748b', minWidth: '80px' }}>{label}</span>
-                <span style={{ fontWeight: 700, color: '#1e3a8a' }}>{value}</span>
+              ['Admission No',  student.admissionNumber],
+              ['Father Name',   guardian?.name || '—'],
+              ['Class',         invoice.className + (invoice.section ? ` — Sec ${invoice.section}` : '')],
+              ['Fee Month',     feeMonth],
+              ['Issue Date',    dateStr],
+              ['Due Date',      dueDateStr],
+            ].map(([lbl, val]) => (
+              <div key={lbl} style={{ display:'flex', marginBottom:'2px', fontSize:'8.5px' }}>
+                <span style={{ color:'#64748b', minWidth:'78px' }}>{lbl}</span>
+                <span style={{ fontWeight:700, color:'#1e3a8a' }}>{val}</span>
               </div>
             ))}
-          </div>
 
-          {/* Copy Badge */}
-          <div style={{ display: 'inline-block', background: '#dbeafe', border: '1px solid #93c5fd', color: '#1e3a8a', fontWeight: 700, fontSize: '10.5px', padding: '3px 10px', borderRadius: '4px', marginBottom: '8px' }}>
-            {copyLabel}
-          </div>
-
-          {/* Bank Details */}
-          <div style={{ background: '#f8faff', border: '1px solid #c7d2fe', borderRadius: '4px', padding: '6px 8px', fontSize: '10px' }}>
-            <div style={{ fontWeight: 700, fontSize: '10.5px', color: '#1e3a8a', marginBottom: '3px' }}>Bank Name: Bank Alfalah Limited</div>
-            <div style={{ color: '#475569' }}>Address: Adil Pur Post office Dhoda, Pasrur</div>
-            <div style={{ color: '#475569' }}>Account#: 01723646922304</div>
-            {/* Barcode representation */}
-            <div style={{ fontFamily: 'Courier New, monospace', fontSize: '14px', letterSpacing: '2px', color: '#1a1a1a', margin: '4px 0' }}>
-              ||| |||| || ||||| || ||||| |||||
-            </div>
-            <div style={{ fontSize: '9px', color: '#64748b', fontStyle: 'italic', borderTop: '1px dashed #e2e8f0', paddingTop: '4px', marginTop: '4px' }}>
-              Instructions* — Please submit the fee before the due date in order to stop getting late fee fine. please submit fee in the school accounts department after submitting into the bank
+            {/* Signature block */}
+            <div style={{ display:'flex', justifyContent:'space-between', marginTop:'8px',
+                          borderTop:'1px dashed #cbd5e1', paddingTop:'5px', fontSize:'7.5px', color:'#64748b' }}>
+              <div>
+                <div style={{ borderBottom:'1px solid #94a3b8', width:'90px', marginTop:'14px' }} />
+                <div>Parent / Guardian Signature</div>
+              </div>
+              <div style={{ textAlign:'right' }}>
+                <div style={{ borderBottom:'1px solid #94a3b8', width:'90px', marginTop:'14px' }} />
+                <div>Accounts Officer</div>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Right: Fee Table */}
-        <div style={{ minWidth: '210px' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: '10.5px', width: '100%' }}>
-            <thead>
-              <tr style={{ background: '#e0e7ff' }}>
-                <th style={{ padding: '4px 6px', border: '1px solid #c7d2fe', color: '#1e3a8a', textAlign: 'left', fontSize: '9.5px' }}>Sr.</th>
-                <th style={{ padding: '4px 6px', border: '1px solid #c7d2fe', color: '#1e3a8a', textAlign: 'left', fontSize: '9.5px' }}>Particulars</th>
-                <th style={{ padding: '4px 6px', border: '1px solid #c7d2fe', color: '#1e3a8a', textAlign: 'right', fontSize: '9.5px' }}>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {FEE_ROWS_BANK.map((row, idx) => {
-                const amt = getRowAmount(invoice.items, row.searchKey);
-                return (
-                  <tr key={row.key} style={{ background: idx % 2 === 0 ? '#fff' : '#f8faff' }}>
-                    <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0' }}>{idx + 1}</td>
-                    <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0' }}>{row.key}</td>
-                    <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{amt > 0 ? amt.toLocaleString() : 0}</td>
-                  </tr>
-                );
-              })}
-              {/* Discount row */}
-              <tr style={{ background: '#f8faff' }}>
-                <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0' }}>11</td>
-                <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0' }}>{discountLabel}</td>
-                <td style={{ padding: '3px 6px', border: '1px solid #e2e8f0', textAlign: 'right' }}>{discount > 0 ? `- ${discount.toLocaleString()}` : '0'}</td>
-              </tr>
-              {/* Total */}
-              <tr style={{ background: '#dbeafe' }}>
-                <td colSpan={2} style={{ padding: '4px 6px', border: '1px solid #93c5fd', fontWeight: 800, color: '#1e3a8a', textAlign: 'right' }}>TOTAL</td>
-                <td style={{ padding: '4px 6px', border: '1px solid #93c5fd', fontWeight: 800, color: '#1e3a8a', textAlign: 'right' }}>Rs {total.toLocaleString()}</td>
-              </tr>
-              {/* Paid Amount (if any) */}
-              {(invoice.paidAmount || 0) > 0 && (
-                <tr style={{ background: '#ecfdf5' }}>
-                  <td colSpan={2} style={{ padding: '4px 6px', border: '1px solid #a7f3d0', fontWeight: 700, color: '#059669', textAlign: 'right' }}>ALREADY PAID</td>
-                  <td style={{ padding: '4px 6px', border: '1px solid #a7f3d0', fontWeight: 800, color: '#059669', textAlign: 'right' }}>- Rs {(invoice.paidAmount || 0).toLocaleString()}</td>
+          {/* Fee Table */}
+          <div style={{ minWidth:'185px' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%' }}>
+              <thead>
+                <tr style={{ background:'#e0e7ff' }}>
+                  <th style={{ padding:'2px 4px', border:'1px solid #c7d2fe', color:'#1e3a8a', textAlign:'left', fontSize:'8px' }}>Sr.</th>
+                  <th style={{ padding:'2px 4px', border:'1px solid #c7d2fe', color:'#1e3a8a', textAlign:'left', fontSize:'8px' }}>Particulars</th>
+                  <th style={{ padding:'2px 4px', border:'1px solid #c7d2fe', color:'#1e3a8a', textAlign:'right', fontSize:'8px' }}>Amount</th>
                 </tr>
-              )}
-              {/* Payable after due (Balance) */}
-              <tr style={{ background: '#fff1f2' }}>
-                <td colSpan={2} style={{ padding: '4px 6px', border: '1px solid #fca5a5', fontWeight: 700, color: '#dc2626', textAlign: 'right', fontSize: '9.5px' }}>
-                  {(invoice.paidAmount || 0) > 0 ? 'BALANCE PAYABLE' : 'PAYABLE AFTER DUE DATE'}
-                </td>
-                <td style={{ padding: '4px 6px', border: '1px solid #fca5a5', fontWeight: 800, color: '#dc2626', textAlign: 'right' }}>
-                  Rs {Math.max(0, total - (invoice.paidAmount || 0)).toLocaleString()}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {FEE_ROWS_BANK.map((row, idx) => {
+                  const amt = getRowAmount(invoice.items, row.searchKey);
+                  return (
+                    <tr key={row.key} style={{ background: idx % 2 === 0 ? '#fff' : '#f8faff' }}>
+                      <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>{idx + 1}</td>
+                      <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>{row.key}</td>
+                      <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', textAlign:'right', fontSize:'8px' }}>
+                        {amt > 0 ? amt.toLocaleString() : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {/* Discount */}
+                {discount > 0 && (
+                  <tr style={{ background:'#f0fdf4' }}>
+                    <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>11</td>
+                    <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>Discount</td>
+                    <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', textAlign:'right', fontSize:'8px', color:'#059669' }}>
+                      − {discount.toLocaleString()}
+                    </td>
+                  </tr>
+                )}
+
+                {/* Total */}
+                <tr style={{ background:'#dbeafe' }}>
+                  <td colSpan={2} style={{ padding:'3px 4px', border:'1px solid #93c5fd', fontWeight:800, color:'#1e3a8a', textAlign:'right', fontSize:'8.5px' }}>TOTAL</td>
+                  <td style={{ padding:'3px 4px', border:'1px solid #93c5fd', fontWeight:800, color:'#1e3a8a', textAlign:'right', fontSize:'8.5px' }}>
+                    Rs {total.toLocaleString()}
+                  </td>
+                </tr>
+
+                {/* Already paid */}
+                {paid > 0 && (
+                  <tr style={{ background:'#d1fae5' }}>
+                    <td colSpan={2} style={{ padding:'2px 4px', border:'1px solid #a7f3d0', fontWeight:700, color:'#059669', textAlign:'right', fontSize:'8px' }}>PAID</td>
+                    <td style={{ padding:'2px 4px', border:'1px solid #a7f3d0', fontWeight:700, color:'#059669', textAlign:'right', fontSize:'8px' }}>
+                      − Rs {paid.toLocaleString()}
+                    </td>
+                  </tr>
+                )}
+
+                {/* Balance */}
+                <tr style={{ background:'#fff1f2' }}>
+                  <td colSpan={2} style={{ padding:'3px 4px', border:'1px solid #fca5a5', fontWeight:800, color:'#dc2626', textAlign:'right', fontSize:'8.5px' }}>
+                    {paid > 0 ? 'BALANCE DUE' : 'AMOUNT PAYABLE'}
+                  </td>
+                  <td style={{ padding:'3px 4px', border:'1px solid #fca5a5', fontWeight:800, color:'#dc2626', textAlign:'right', fontSize:'8.5px' }}>
+                    Rs {balance.toLocaleString()}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
+  // ── Modal ─────────────────────────────────────────────────────────────────
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-3xl max-h-[95vh] flex flex-col z-10 animate-scale-in bg-white rounded-2xl shadow-2xl overflow-hidden">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between bg-blue-700 px-5 py-3">
-          <div>
-            <h2 className="font-bold text-white text-base">Bank Challan — 3 Copies</h2>
-            <p className="text-blue-100 text-xs">Bank Copy · Student Copy · Institute Copy</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handlePrint} className="h-8 gap-1.5 text-xs bg-white text-blue-700 hover:bg-blue-50">
-              <Printer className="h-3.5 w-3.5" /> Print Challan
-            </Button>
-            <button onClick={onClose} className="text-white/70 hover:text-white">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
+    <>
+      {/* Fixed full-screen backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
-        {/* Challan Content — 3 copies stacked */}
-        <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
-          <div ref={printRef} style={{ maxWidth: '720px', margin: '0 auto' }}>
-            {COPIES.map((c) => renderChallan(c))}
+      {/* Fixed modal card */}
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-10 pointer-events-none">
+        <div className="pointer-events-auto w-full max-w-3xl max-h-[88vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden animate-scale-in bg-white">
+
+          {/* Toolbar — always visible */}
+          <div className="flex-shrink-0 flex items-center justify-between bg-blue-700 px-5 py-3 rounded-t-2xl">
+            <div>
+              <h2 className="font-bold text-white text-base">Fee Challan — 3 Copies</h2>
+
+
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handlePrint}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  background: '#f59e0b', color: '#1e1b4b',
+                  fontWeight: 800, fontSize: '13px',
+                  padding: '7px 16px', borderRadius: '8px',
+                  border: 'none', cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+                }}
+              >
+                <Printer style={{ width: '14px', height: '14px' }} />
+                Print Challan
+              </button>
+              <button onClick={onClose} className="ml-1 text-white/70 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
+
+          {/* Scrollable preview */}
+          <div className="flex-1 overflow-y-auto p-4 bg-gray-50">
+            <div ref={printRef} style={{ maxWidth: '720px', margin: '0 auto' }}>
+              {COPIES.map((c, idx) => (
+                <div key={c.label}>
+                  {renderSlip(c)}
+                  {idx < COPIES.length - 1 && (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      margin: '6px 0',
+                      color: '#94a3b8',
+                      fontSize: '11px',
+                    }}>
+                      <div style={{ flex:1, borderTop:'1.5px dashed #94a3b8' }} />
+                      <span style={{ transform:'rotate(-90deg)', display:'inline-block', userSelect:'none', fontSize:'14px' }}>✂</span>
+                      <div style={{ flex:1, borderTop:'1.5px dashed #94a3b8' }} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthContext';
 import { NAV_ITEMS, APP_NAME } from '@/lib/constants';
 import { cn } from '@/lib/utils';
+import logoImg from '@/assets/logo.jpeg';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, DollarSign,
   Receipt, Package, UserPlus, BarChart3, Settings, ChevronDown,
@@ -76,18 +77,18 @@ export function Sidebar({ isCollapsed, isMobileOpen, onToggleCollapse, onMobileC
         <div className="flex h-[var(--header-height)] items-center justify-between px-4 border-b border-slate-100 bg-gradient-to-r from-blue-700 to-indigo-700">
           {!isCollapsed && (
             <div className="flex items-center gap-3 animate-fade-in">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20 text-white shrink-0">
-                <GraduationCap className="h-5 w-5" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-full overflow-hidden bg-white p-0.5 shadow-md shrink-0">
+                <img src={logoImg} alt="ACE Logo" className="h-full w-full object-cover rounded-full" />
               </div>
               <div className="overflow-hidden">
                 <h1 className="text-sm font-bold text-white tracking-tight truncate">{APP_NAME}</h1>
-                <p className="text-[10px] text-blue-100">School Management System</p>
+                <p className="text-[10px] text-blue-100">The School of Science &amp; Arts</p>
               </div>
             </div>
           )}
           {isCollapsed && (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20 text-white mx-auto">
-              <GraduationCap className="h-5 w-5" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-full overflow-hidden bg-white p-0.5 shadow-md mx-auto">
+              <img src={logoImg} alt="ACE Logo" className="h-full w-full object-cover rounded-full" />
             </div>
           )}
 

@@ -5,8 +5,9 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthContext';
-import { GraduationCap, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
+import logoImg from '@/assets/logo.jpeg';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -73,13 +74,13 @@ export function LoginPage() {
 
         {/* Content */}
         <div className="relative z-10 flex flex-col justify-center px-12 xl:px-20 text-white">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-sm">
-              <GraduationCap className="h-8 w-8" />
+          <div className="flex items-center gap-4 mb-8">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl overflow-hidden bg-white p-1 shadow-xl shrink-0">
+              <img src={logoImg} alt="ACE Educational Hub" className="h-full w-full object-cover rounded-xl" />
             </div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight">{APP_NAME}</h1>
-              <p className="text-sm text-white/70">School Management System</p>
+              <p className="text-sm text-white/70">The School of Science &amp; Arts</p>
             </div>
           </div>
 
@@ -116,12 +117,12 @@ export function LoginPage() {
         <div className="w-full max-w-[420px]">
           {/* Mobile Logo */}
           <div className="flex lg:hidden items-center gap-3 mb-10">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl gradient-primary text-white">
-              <GraduationCap className="h-6 w-6" />
+            <div className="flex h-12 w-12 items-center justify-center rounded-full overflow-hidden bg-white p-0.5 shadow-md shrink-0 ring-2 ring-blue-200">
+              <img src={logoImg} alt="ACE Educational Hub" className="h-full w-full object-cover rounded-full" />
             </div>
             <div>
               <h1 className="text-lg font-bold text-[hsl(var(--foreground))]">{APP_NAME}</h1>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">School Management System</p>
+              <p className="text-xs text-[hsl(var(--muted-foreground))]">The School of Science &amp; Arts</p>
             </div>
           </div>
 

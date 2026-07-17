@@ -8,6 +8,7 @@ import { Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Invoice, Student, Fee } from '@/types';
 import { APP_NAME } from '@/lib/constants';
+import logoImg from '@/assets/logo.jpeg';
 
 
 interface FeeReceiptPrintProps {
@@ -102,7 +103,8 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
             * { margin:0; padding:0; box-sizing:border-box; }
             body { font-family: 'Arial', sans-serif; font-size: 12px; color: #1a1a1a; padding: 24px; }
             .header { text-align: center; margin-bottom: 8px; }
-            .logo-circle { width: 48px; height: 48px; background: #1d4ed8; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: white; font-size: 18px; font-weight: 900; margin-bottom: 4px; }
+            .logo-circle { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; border: 2px solid #1d4ed8; margin: 0 auto 6px; }
+            .logo-circle img { width: 100%; height: 100%; object-fit: cover; }
             .school-name { font-size: 22px; font-weight: 900; color: #1e3a8a; }
             .sub-line { font-size: 11px; color: #64748b; }
             .title { font-size: 16px; font-weight: 700; color: #1d4ed8; margin: 8px 0 12px; text-align: center; }
@@ -126,7 +128,12 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
             .prepared-by { font-weight: 700; color: #1e3a8a; border-bottom: 1px solid #1e3a8a; display: inline-block; }
           </style>
         </head>
-        <body>${content.innerHTML}</body>
+        <body>
+          <style>
+            .logo-circle img { width: 100%; height: 100%; object-fit: cover; }
+          </style>
+          ${content.innerHTML.replace(/src="[^"]*logo[^"]*"/g, `src="${window.location.origin + '/logo.jpeg'}"`)}
+        </body>
       </html>
     `);
     w.document.close();
@@ -161,12 +168,12 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
           <div ref={printRef} style={{ fontFamily: 'Arial, sans-serif', fontSize: '12px', color: '#1a1a1a', maxWidth: '700px', margin: '0 auto' }}>
             {/* School Header */}
             <div style={{ textAlign: 'center', marginBottom: '8px' }}>
-              <div style={{ width: '48px', height: '48px', background: '#1d4ed8', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '18px', fontWeight: 900, marginBottom: '4px' }}>
-                A
+              <div style={{ width: '56px', height: '56px', borderRadius: '50%', overflow: 'hidden', border: '2px solid #1d4ed8', margin: '0 auto 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <img src={logoImg} alt="ACE Logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               </div>
               <div style={{ fontSize: '22px', fontWeight: 900, color: '#1e3a8a' }}>{APP_NAME}</div>
-              <div style={{ fontSize: '11px', color: '#64748b' }}>Your target line here</div>
-              <div style={{ fontSize: '10px', color: '#64748b' }}>+923460204447 | Pakistan | www.aceedu.com</div>
+              <div style={{ fontSize: '11px', color: '#64748b' }}>The School of Science &amp; Arts</div>
+              <div style={{ fontSize: '10px', color: '#64748b' }}>Gondlanwala road, Galla Shazi Hospital wala | +923460204447</div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d4ed8', marginTop: '6px' }}>Fees Paid Receipt</div>
             </div>
 

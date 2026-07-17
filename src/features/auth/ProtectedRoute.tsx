@@ -27,13 +27,30 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     );
   }
 
+  // Debug routing
+  console.log('ProtectedRoute Access Check:', {
+    pathname: location.pathname,
+    isAuthenticated,
+    userRole: user?.role,
+    userActive: user?.isActive,
+    allowedRoles
+  });
+
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    console.log('ProtectedRoute: Not authenticated, redirecting to login');
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // Check active status
+  if (user && !user.isActive) {
+    console.log('ProtectedRoute: User is inactive/disabled, redirecting to unauthorized');
+    return <Navigate to="/unauthorized" replace />;
   }
 
   // Check role-based access
   if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+    console.log('ProtectedRoute: Role mismatch, redirecting to unauthorized. User role:', user.role, 'Allowed:', allowedRoles);
     return <Navigate to="/unauthorized" replace />;
   }
 
