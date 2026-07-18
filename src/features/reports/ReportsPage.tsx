@@ -39,7 +39,18 @@ const PIE_COLORS = [COLORS.indigo, COLORS.emerald, COLORS.amber, COLORS.blue, CO
 
 // ── Static month labels ───────────────────────────────────────────────────────
 
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const YEARS = Array.from({ length: 31 }, (_, i) => 2020 + i);
+
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function getCurrentMonthLabel(): string {
+  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
 
 // ── Report Data type ──────────────────────────────────────────────────────────
 
@@ -95,10 +106,13 @@ export default function ReportsPage() {
   // Full report card (if stored)
   const [reportCardData, setReportCardData] = useState<FullReportCardType | null>(null);
   const [showFullCard, setShowFullCard] = useState(false);
+  // Date Filter
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonthLabel());
+  const [monthPart, yearPart] = selectedMonth.split(' ');
 
   useEffect(() => {
     loadReportData();
-  }, []);
+  }, [selectedMonth]); // Reload when month changes
 
   const loadReportData = async () => {
     setIsLoading(true);
@@ -152,9 +166,9 @@ export default function ReportsPage() {
       ].filter((s) => s.value > 0);
 
       // Monthly revenue
-      const now = new Date();
+      const selectedDate = new Date(`${monthPart} 1, ${yearPart}`);
       const monthlyRevenue = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date(now.getFullYear(), now.getMonth() - (6 - i), 1);
+        const d = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - (6 - i), 1);
         const label = MONTHS_SHORT[d.getMonth()];
         const monthFees = fees.filter((f) => {
           if (!f.paidDate) return false;
@@ -440,9 +454,38 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6 animate-fade-in pb-10">
       <PageHeader
-        title="School Analytics & Reports"
-        description="Comprehensive overview of students, finances, attendance, and academics."
+        title="Reports & Analytics"
+        description="Comprehensive insights into school performance, revenue, and student academics."
+        action={{
+          label: 'Export Report',
+          onClick: () => window.print(),
+          icon: <Printer className="h-4 w-4" />
+        }}
       />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 -mt-2">
+        <div className="flex gap-2 items-center bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
+          <div className="relative">
+            <select
+              value={monthPart}
+              onChange={(e) => setSelectedMonth(`${e.target.value} ${yearPart}`)}
+              className="h-9 pl-4 pr-10 rounded-xl border-transparent bg-slate-50 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer hover:bg-slate-100"
+            >
+              {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
+          </div>
+          <div className="relative">
+            <select
+              value={yearPart}
+              onChange={(e) => setSelectedMonth(`${monthPart} ${e.target.value}`)}
+              className="h-9 pl-4 pr-10 rounded-xl border-transparent bg-slate-50 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 appearance-none cursor-pointer hover:bg-slate-100"
+            >
+              {YEARS.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
+          </div>
+        </div>
+      </div>
 
         {/* Tab Nav */}
       <div className="flex items-center gap-1 rounded-xl border border-[hsl(var(--border))]/60 bg-[hsl(var(--muted))]/30 p-1 w-fit">

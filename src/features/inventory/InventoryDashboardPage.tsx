@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import {
   Package, TrendingUp, Layers, BarChart3,
   BookCopy, Shirt, Pencil, ChevronRight, Loader2,
-  ShoppingCart, CalendarDays,
+  ShoppingCart, CalendarDays, RefreshCw,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -21,19 +21,21 @@ import {
 import type { StationeryItem, UniformItem, BookItem, InventorySale } from '@/types';
 import { toast } from 'sonner';
 
+// ── Month helpers ─────────────────────────────────────────────────────────────
+
 function getCurrentMonthLabel() {
   return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
-function generateMonthOptions(): string[] {
-  const months: string[] = [];
-  const now = new Date();
-  for (let i = 12; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }));
-  }
-  return months;
-}
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+// Generate years from 2020 to 2050
+const YEARS = Array.from({ length: 31 }, (_, i) => 2020 + i);
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface CategoryStats {
   name: string;
@@ -48,16 +50,22 @@ interface CategoryStats {
   href: string;
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function InventoryDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthLabel());
   const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [showAllTime, setShowAllTime] = useState(false);
   const [monthlyRevenue, setMonthlyRevenue] = useState(0);
   const [monthlySales, setMonthlySales] = useState<InventorySale[]>([]);
 
   const [stats, setStats] = useState<CategoryStats[]>([]);
   const [totalPurchaseValue, setTotalPurchaseValue] = useState(0);
   const [totalSaleValue, setTotalSaleValue] = useState(0);
+
+  // Split selectedMonth into parts for UI
+  const [monthPart, yearPart] = selectedMonth ? selectedMonth.split(' ') : getCurrentMonthLabel().split(' ');
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -78,10 +86,18 @@ export default function InventoryDashboardPage() {
         qtyMap[s.itemId] = (qtyMap[s.itemId] || 0) + s.quantity;
       });
 
-      // Monthly sales & revenue
-      const mSales = allSales.filter((s) => s.month === selectedMonth);
-      setMonthlySales(mSales);
-      setMonthlyRevenue(mSales.reduce((sum, s) => sum + s.totalAmount, 0));
+      // Monthly / All-time sales & revenue
+      const displaySales = showAllTime
+        ? allSales
+        : allSales.filter((s) => {
+            let mStr = (s.month || '').toLowerCase();
+            if (!mStr && s.saleDate) {
+              mStr = new Date(s.saleDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+            }
+            return mStr.includes(monthPart.toLowerCase()) && mStr.includes(yearPart.toString());
+          });
+      setMonthlySales(displaySales);
+      setMonthlyRevenue(displaySales.reduce((sum, s) => sum + s.totalAmount, 0));
 
       // Category stats
       const statRec = (
@@ -140,19 +156,20 @@ export default function InventoryDashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedMonth]);
+  }, [selectedMonth, showAllTime]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
   const totalItems = stats.reduce((s, c) => s + c.totalItems, 0);
   const totalRemainingValue = totalPurchaseValue - totalSaleValue;
+  const displayLabel = showAllTime ? 'All Time' : selectedMonth;
 
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
         title="Inventory Overview"
-        description="Track purchased stock, sold items, remaining inventory, and monthly revenue across all categories."
-        action={{ label: 'Refresh', onClick: loadData, icon: <Loader2 className="h-4 w-4" /> }}
+        description="Track purchased stock, sold items, remaining inventory, and revenue across all categories."
+        action={{ label: 'Refresh', onClick: loadData, icon: <RefreshCw className="h-4 w-4" /> }}
       />
 
       {/* Month Selector */}
@@ -160,32 +177,64 @@ export default function InventoryDashboardPage() {
         <CardContent className="p-4">
           <div className="flex flex-wrap gap-3 items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-emerald-600 flex items-center justify-center">
+              <div className="h-9 w-9 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
                 <CalendarDays className="h-5 w-5 text-white" />
               </div>
               <div>
                 <div className="text-sm font-bold text-slate-800">Monthly Revenue View</div>
-                <div className="text-[11px] text-slate-500">Select a month to see sales revenue</div>
+                <div className="text-[11px] text-slate-500">
+                  {availableMonths.length > 0
+                    ? `${availableMonths.length} months with data · History from 2020`
+                    : 'Full history available from January 2020'}
+                </div>
               </div>
             </div>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="h-10 pl-4 pr-10 rounded-xl border border-emerald-200 bg-white text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              {availableMonths.length > 0 && (
-                <optgroup label="── Months with data ──">
-                  {availableMonths.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="── All months ──">
-                {generateMonthOptions().map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </optgroup>
-            </select>
+            <div className="flex items-center gap-2.5">
+              <div className="flex gap-2">
+                <div className="relative">
+                  <select
+                    value={monthPart}
+                    onChange={(e) => {
+                      setSelectedMonth(`${e.target.value} ${yearPart}`);
+                      setShowAllTime(false);
+                    }}
+                    disabled={showAllTime}
+                    className="h-10 pl-4 pr-10 rounded-xl border border-emerald-200 bg-white text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-500">▾</span>
+                </div>
+                <div className="relative">
+                  <select
+                    value={yearPart}
+                    onChange={(e) => {
+                      setSelectedMonth(`${monthPart} ${e.target.value}`);
+                      setShowAllTime(false);
+                    }}
+                    disabled={showAllTime}
+                    className="h-10 pl-4 pr-10 rounded-xl border border-emerald-200 bg-white text-sm font-semibold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-emerald-500">▾</span>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllTime(!showAllTime)}
+                className={`h-10 gap-1.5 text-xs font-semibold rounded-xl border-emerald-200 whitespace-nowrap ${
+                  showAllTime ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-emerald-700'
+                }`}
+              >
+                {showAllTime ? '✓ All Time' : 'Show All Time'}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -253,9 +302,11 @@ export default function InventoryDashboardPage() {
                     <BarChart3 className="h-5 w-5 text-violet-600" />
                   </div>
                   <div>
-                    <div className="text-xs text-slate-500 font-medium">Monthly Revenue</div>
+                    <div className="text-xs text-slate-500 font-medium">
+                      {showAllTime ? 'All-Time Revenue' : 'Monthly Revenue'}
+                    </div>
                     <div className="text-lg font-bold text-violet-700">{formatCurrency(monthlyRevenue)}</div>
-                    <div className="text-[10px] text-slate-400">{selectedMonth}</div>
+                    <div className="text-[10px] text-slate-400">{displayLabel}</div>
                   </div>
                 </div>
               </CardContent>
@@ -325,14 +376,16 @@ export default function InventoryDashboardPage() {
             ))}
           </div>
 
-          {/* Monthly Sales Table */}
+          {/* Monthly / All-Time Sales Table */}
           {monthlySales.length > 0 && (
             <Card className="border border-slate-200 shadow-sm">
               <CardContent className="p-0">
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <ShoppingCart className="h-4 w-4 text-blue-600" />
-                    <h3 className="font-bold text-slate-800 text-sm">Sales in {selectedMonth}</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">
+                      Sales — {displayLabel}
+                    </h3>
                     <span className="text-[11px] text-slate-400">({monthlySales.length} transactions)</span>
                   </div>
                   <div className="text-sm font-bold text-emerald-700">{formatCurrency(monthlyRevenue)}</div>
@@ -346,6 +399,7 @@ export default function InventoryDashboardPage() {
                         <th className="text-center px-4 py-3 font-semibold text-slate-500">Qty</th>
                         <th className="text-right px-4 py-3 font-semibold text-slate-500">Unit Price</th>
                         <th className="text-right px-4 py-3 font-semibold text-slate-500">Total</th>
+                        <th className="text-left px-4 py-3 font-semibold text-slate-500">Month</th>
                         <th className="text-left px-4 py-3 font-semibold text-slate-500">Date</th>
                       </tr>
                     </thead>
@@ -357,15 +411,18 @@ export default function InventoryDashboardPage() {
                           <td className="px-4 py-2.5 text-center font-semibold">{sale.quantity}</td>
                           <td className="px-4 py-2.5 text-right text-slate-600">{formatCurrency(sale.unitPrice)}</td>
                           <td className="px-4 py-2.5 text-right font-bold text-emerald-700">{formatCurrency(sale.totalAmount)}</td>
+                          <td className="px-4 py-2.5 text-slate-500">{sale.month || '—'}</td>
                           <td className="px-4 py-2.5 text-slate-500">{sale.saleDate}</td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="bg-emerald-50 border-t border-emerald-100">
-                        <td colSpan={4} className="px-4 py-3 font-bold text-slate-700">Monthly Total Revenue</td>
+                        <td colSpan={4} className="px-4 py-3 font-bold text-slate-700">
+                          {showAllTime ? 'All-Time Total Revenue' : 'Monthly Total Revenue'}
+                        </td>
                         <td className="px-4 py-3 text-right font-bold text-emerald-700 text-sm">{formatCurrency(monthlyRevenue)}</td>
-                        <td></td>
+                        <td colSpan={2}></td>
                       </tr>
                     </tfoot>
                   </table>
@@ -378,7 +435,9 @@ export default function InventoryDashboardPage() {
             <Card className="border border-dashed border-slate-200">
               <CardContent className="p-8 text-center">
                 <ShoppingCart className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-                <p className="font-semibold text-slate-600">No sales recorded for {selectedMonth}</p>
+                <p className="font-semibold text-slate-600">
+                  No sales recorded for {displayLabel}
+                </p>
                 <p className="text-xs text-slate-400 mt-1">
                   Record sales from the Stationery, Uniforms, or Books pages using the "Record Sale" button.
                 </p>

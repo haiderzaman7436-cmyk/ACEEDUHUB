@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Eye, X, CreditCard, Loader2, CheckCircle2, RefreshCw,
-  Landmark, Receipt, Banknote, CalendarDays, Printer,
+  Landmark, Receipt, Banknote, Printer,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,6 +20,13 @@ import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthContext';
 import { BankInvoicePrint } from '@/features/fees/BankInvoicePrint';
 import logoImg from '@/assets/logo.jpeg';
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const YEARS = Array.from({ length: 31 }, (_, i) => 2020 + i);
 
 function getCurrentMonthLabel(): string {
   return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -60,8 +67,12 @@ export default function InvoicesPage() {
   // Filters
   const [classFilter, setClassFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const [showAllMonths, setShowAllMonths] = useState(false);
-  const currentMonth = getCurrentMonthLabel();
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonthLabel());
+  
+  // Split month filter for UI
+  const [monthPart, yearPart] = selectedMonth.split(' ');
 
   const loadInvoices = useCallback(() => {
     setIsLoading(true);
@@ -238,12 +249,17 @@ export default function InvoicesPage() {
     }
   };
 
-  // Filter logic — default: current month only
+  // Filter logic
   const filteredInvoices = invoices.filter((inv) => {
-    const matchesMonth = showAllMonths || (inv.month === currentMonth);
+    let mStr = (inv.month || '').toLowerCase();
+    if (!mStr && inv.createdAt) {
+      mStr = new Date(inv.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+    }
+    const matchesMonth = showAllMonths || (mStr.includes(monthPart.toLowerCase()) && mStr.includes(yearPart.toString()));
     const matchesClass = !classFilter || inv.className.toLowerCase() === classFilter.toLowerCase();
     const matchesCategory = !categoryFilter || (inv.category || 'school').toLowerCase() === categoryFilter.toLowerCase();
-    return matchesMonth && matchesClass && matchesCategory;
+    const matchesStatus = !statusFilter || inv.status === statusFilter;
+    return matchesMonth && matchesClass && matchesCategory && matchesStatus;
   });
 
   // Summary for current view
@@ -622,7 +638,7 @@ export default function InvoicesPage() {
               <div>
                 <h3 className="text-sm font-bold text-slate-800">Invoice Registry</h3>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  {showAllMonths ? 'Showing all months' : `Showing: ${currentMonth}`}
+                  {showAllMonths ? 'Showing all months' : `Showing: ${selectedMonth}`}
                   {' · '}{filteredInvoices.length} invoices
                 </p>
               </div>
@@ -653,15 +669,66 @@ export default function InvoicesPage() {
             {/* Controls */}
             <div className="flex flex-wrap gap-2.5 items-center">
               {/* Month toggle */}
+              <div className="flex gap-2">
+                <div className="relative">
+                  <select
+                    value={monthPart}
+                    onChange={(e) => {
+                      setSelectedMonth(`${e.target.value} ${yearPart}`);
+                      setShowAllMonths(false);
+                    }}
+                    disabled={showAllMonths}
+                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
+                </div>
+                <div className="relative">
+                  <select
+                    value={yearPart}
+                    onChange={(e) => {
+                      setSelectedMonth(`${monthPart} ${e.target.value}`);
+                      setShowAllMonths(false);
+                    }}
+                    disabled={showAllMonths}
+                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                  >
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▼</span>
+                </div>
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setShowAllMonths(!showAllMonths)}
-                className={`h-9 gap-1.5 text-xs font-semibold rounded-xl ${showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'border-slate-200 text-slate-700'}`}
+                className={`h-10 gap-1.5 text-xs font-semibold rounded-xl ${
+                  showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700'
+                }`}
               >
-                <CalendarDays className="h-3.5 w-3.5" />
-                {showAllMonths ? 'Current Month Only' : 'Show All Months'}
+                {showAllMonths ? '✓ Showing All' : 'Show All Time'}
               </Button>
+
+              <div className="relative">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="partial">Partial</option>
+                  <option value="paid">Paid</option>
+                  <option value="overdue">Overdue</option>
+                </select>
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▼</span>
+              </div>
 
               {/* Category Filter */}
               <select

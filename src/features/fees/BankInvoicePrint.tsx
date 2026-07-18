@@ -15,7 +15,7 @@ interface BankInvoicePrintProps {
   onClose: () => void;
 }
 
-const SCHOOL_ADDRESS = 'Gondlanwala road, Galla DR Shazia wala';
+const SCHOOL_ADDRESS = 'Gondlanwala Road Galla Shazia Hospital Wala';
 const SCHOOL_PHONE   = '+92-346-0204447';
 
 const FEE_ROWS_BANK = [

@@ -173,7 +173,7 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
               </div>
               <div style={{ fontSize: '22px', fontWeight: 900, color: '#1e3a8a' }}>{APP_NAME}</div>
               <div style={{ fontSize: '11px', color: '#64748b' }}>The School of Science &amp; Arts</div>
-              <div style={{ fontSize: '10px', color: '#64748b' }}>Gondlanwala road, Galla Shazi Hospital wala | +923460204447</div>
+              <div style={{ fontSize: '10px', color: '#64748b' }}>Gondlanwala Road Galla Shazia Hospital Wala | +923460204447</div>
               <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d4ed8', marginTop: '6px' }}>Fees Paid Receipt</div>
             </div>
 

@@ -234,7 +234,7 @@ export interface FeeTemplate {
 
 // ── Invoices ────────────────────────────────────────────────────────────────
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'cancelled' | 'overdue';
+export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'partial' | 'cancelled' | 'overdue';
 
 export interface InvoiceItem {
   id: string;

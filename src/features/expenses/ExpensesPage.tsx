@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   TrendingDown, Plus, Edit2, Trash2, X, Loader2,
   DollarSign, Calendar, Tag, RefreshCw, CheckCircle2,
+  History, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -71,6 +72,27 @@ function CatBadge({ cat }: { cat: ExpenseCategory }) {
   );
 }
 
+// ── Month list helpers ────────────────────────────────────────────────────────
+
+function getCurrentMonthLabel(): string {
+  return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+// Generate years from 2020 to 2050
+const YEARS = Array.from({ length: 31 }, (_, i) => 2020 + i);
+
+const ALL_MONTHS_FLAT: string[] = [];
+for (let y = 2050; y >= 2020; y--) {
+  for (let m = 11; m >= 0; m--) {
+    ALL_MONTHS_FLAT.push(`${MONTHS[m]} ${y}`);
+  }
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ExpensesPage() {
@@ -89,9 +111,13 @@ export default function ExpensesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Filter
+  // Filter state
+  const [showHistoryMode, setShowHistoryMode] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
-  const [monthFilter, setMonthFilter] = useState('');
+  const [monthFilter, setMonthFilter] = useState(''); // '' = all months
+
+  // Split month filter for UI
+  const [monthPart, yearPart] = (monthFilter || getCurrentMonthLabel()).split(' ');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -172,13 +198,24 @@ export default function ExpensesPage() {
     }
   };
 
-  // Filter logic
-  const uniqueMonths = Array.from(new Set(expenses.map((e) => e.month))).sort().reverse();
+  // Filter logic — month filter uses full 2020-now list
   const filtered = expenses.filter((e) => {
     const matchCat = !categoryFilter || e.category === categoryFilter;
     const matchMonth = !monthFilter || e.month === monthFilter;
     return matchCat && matchMonth;
   });
+
+  // History navigation helpers
+  const currentMonthIdx = ALL_MONTHS_FLAT.indexOf(monthFilter || getCurrentMonthLabel());
+  const canGoPrev = currentMonthIdx < ALL_MONTHS_FLAT.length - 1;
+  const canGoNext = currentMonthIdx > 0;
+  const navigateMonth = (dir: 'prev' | 'next') => {
+    const idx = monthFilter ? ALL_MONTHS_FLAT.indexOf(monthFilter) : 0;
+    const newIdx = dir === 'prev' ? idx + 1 : idx - 1;
+    if (newIdx >= 0 && newIdx < ALL_MONTHS_FLAT.length) {
+      setMonthFilter(ALL_MONTHS_FLAT[newIdx]);
+    }
+  };
 
   const columns: Column<Expense>[] = [
     {
@@ -344,39 +381,108 @@ export default function ExpensesPage() {
 
       {/* Filter toolbar */}
       <Card className="border border-slate-200 shadow-sm">
-        <CardContent className="p-4 flex flex-wrap gap-3 items-center justify-between bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <TrendingDown className="h-5 w-5 text-red-500 shrink-0" />
-            <div>
-              <h3 className="text-sm font-bold text-slate-800">Expense Ledger</h3>
-              <p className="text-[11px] text-slate-400">Filter by category or month</p>
+        <CardContent className="p-4 bg-slate-50/50">
+          <div className="flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-3">
+              <TrendingDown className="h-5 w-5 text-red-500 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Expense Ledger</h3>
+                <p className="text-[11px] text-slate-400">
+                  {monthFilter ? `Viewing: ${monthFilter}` : 'Showing all months'} · {filtered.length} records
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <Button size="sm" variant="outline" onClick={loadData} className="h-9 gap-1.5 text-xs">
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+
+              {/* History mode toggle */}
+              <Button
+                size="sm"
+                variant={showHistoryMode ? 'default' : 'outline'}
+                onClick={() => { setShowHistoryMode(!showHistoryMode); if (showHistoryMode) setMonthFilter(''); }}
+                className={`h-9 gap-1.5 text-xs font-semibold ${
+                  showHistoryMode ? 'bg-indigo-600 text-white' : 'text-indigo-600 border-indigo-200'
+                }`}
+              >
+                <History className="h-3.5 w-3.5" />
+                History
+              </Button>
+
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All Categories</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </select>
+
+              {/* Full month range selector */}
+              <div className="flex gap-2">
+                <div className="relative">
+                  <select
+                    value={monthPart}
+                    onChange={(e) => {
+                      setMonthFilter(`${e.target.value} ${yearPart}`);
+                      setShowHistoryMode(false);
+                    }}
+                    className="h-9 rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+                  >
+                    {MONTHS.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▾</span>
+                </div>
+                <div className="relative">
+                  <select
+                    value={yearPart}
+                    onChange={(e) => {
+                      setMonthFilter(`${monthPart} ${e.target.value}`);
+                      setShowHistoryMode(false);
+                    }}
+                    className="h-9 rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+                  >
+                    {YEARS.map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[10px]">▾</span>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="flex gap-2.5 items-center">
-            <Button size="sm" variant="outline" onClick={loadData} className="h-9 gap-1.5 text-xs">
-              <RefreshCw className="h-3.5 w-3.5" />
-            </Button>
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">All Categories</option>
-              {CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
-            <select
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">All Months</option>
-              {uniqueMonths.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
+
+          {/* History navigation arrows — only when a month is selected */}
+          {showHistoryMode && (
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canGoPrev}
+                onClick={() => navigateMonth('prev')}
+                className="h-8 gap-1.5 text-xs"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Older
+              </Button>
+              <span className="text-xs font-bold text-slate-700">
+                {monthFilter || 'All Months'}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!canGoNext}
+                onClick={() => navigateMonth('next')}
+                className="h-8 gap-1.5 text-xs"
+              >
+                Newer <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

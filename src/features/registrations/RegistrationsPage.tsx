@@ -87,6 +87,11 @@ export default function RegistrationsPage() {
   const [isBulkSendOpen, setIsBulkSendOpen] = useState(false);
   const [isBulkSending, setIsBulkSending] = useState(false);
 
+  // Bulk fee assignment
+  const [isBulkFeeOpen, setIsBulkFeeOpen] = useState(false);
+  const [bulkFeeAmount, setBulkFeeAmount] = useState(0);
+  const [isBulkFeeSubmitting, setIsBulkFeeSubmitting] = useState(false);
+
   // Delete
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -197,6 +202,27 @@ export default function RegistrationsPage() {
       toast.error('Bulk send admission failed.');
     } finally {
       setIsBulkSending(false);
+    }
+  };
+
+  const handleBulkFeeAssign = async () => {
+    if (selectedIds.length === 0 || bulkFeeAmount <= 0) return;
+    setIsBulkFeeSubmitting(true);
+    try {
+      await Promise.all(
+        selectedIds.map((id) => markGradeRegistrationFeePaid(id, bulkFeeAmount)),
+      );
+      toast.success(
+        `Fee of ${formatCurrency(bulkFeeAmount)} assigned to ${selectedIds.length} student${selectedIds.length > 1 ? 's' : ''}.`,
+      );
+      setIsBulkFeeOpen(false);
+      setBulkFeeAmount(0);
+      setSelectedIds([]);
+      loadData();
+    } catch {
+      toast.error('Bulk fee assignment failed.');
+    } finally {
+      setIsBulkFeeSubmitting(false);
     }
   };
 
@@ -545,20 +571,30 @@ export default function RegistrationsPage() {
         ))}
       </div>
 
-      {/* Bulk Send Admission */}
+      {/* Bulk Actions Bar */}
       {selectedIds.length > 0 && (
-        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+        <div className="flex items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex-wrap">
           <UserCheck className="h-5 w-5 text-indigo-600 shrink-0" />
           <p className="text-sm font-semibold text-indigo-800 flex-1">
             {selectedIds.length} student{selectedIds.length > 1 ? 's' : ''} selected
           </p>
+          {/* Bulk Send Admission */}
           <Button
             size="sm"
             className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
             onClick={() => setIsBulkSendOpen(true)}
           >
             <Send className="h-3.5 w-3.5" />
-            Send Admission to All Selected
+            Send Admission to All
+          </Button>
+          {/* Bulk Assign Fee */}
+          <Button
+            size="sm"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+            onClick={() => { setBulkFeeAmount(currentFeeStructure ? currentFeeStructure.registrationFee + currentFeeStructure.examFee : 0); setIsBulkFeeOpen(true); }}
+          >
+            <CreditCard className="h-3.5 w-3.5" />
+            Assign Same Fee to All
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Clear</Button>
         </div>
@@ -827,6 +863,88 @@ export default function RegistrationsPage() {
         confirmLabel="Send Admission"
         isLoading={isBulkSending}
       />
+
+      {/* ── Bulk Fee Assignment Modal ──────────────────────────────────────── */}
+      {isBulkFeeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsBulkFeeOpen(false)} />
+          <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-slate-800 text-base">Bulk Fee Assignment</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Assign same fee amount to {selectedIds.length} selected Grade {activeTab} student{selectedIds.length > 1 ? 's' : ''}
+                </p>
+              </div>
+              <button onClick={() => setIsBulkFeeOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Info */}
+              <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 text-sm space-y-1.5">
+                <div className="flex items-center gap-2 text-emerald-700 font-semibold mb-2">
+                  <Users className="h-4 w-4" />
+                  {selectedIds.length} students selected
+                </div>
+                {currentFeeStructure && (
+                  <div className="text-xs text-slate-600 space-y-1">
+                    <div className="flex justify-between">
+                      <span>Standard Registration Fee:</span>
+                      <span className="font-semibold">{formatCurrency(currentFeeStructure.registrationFee)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Standard Admission Fee:</span>
+                      <span className="font-semibold">{formatCurrency(currentFeeStructure.examFee)}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-emerald-100 pt-1 mt-1 font-bold text-slate-800">
+                      <span>Standard Total:</span>
+                      <span className="text-emerald-700">{formatCurrency(currentFeeStructure.registrationFee + currentFeeStructure.examFee)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Fee Amount Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700">Amount to Assign per Student (PKR) *</label>
+                <Input
+                  type="number"
+                  value={bulkFeeAmount}
+                  onChange={(e) => setBulkFeeAmount(Number(e.target.value))}
+                  min={1}
+                  placeholder="e.g. 5000"
+                  className="border-slate-200"
+                />
+                <p className="text-[11px] text-slate-400">
+                  This records a payment of this amount for each of the {selectedIds.length} selected students.
+                </p>
+              </div>
+
+              {bulkFeeAmount > 0 && (
+                <div className="bg-blue-50 rounded-xl p-3 text-sm font-semibold text-blue-800 text-center">
+                  Total to assign: {formatCurrency(bulkFeeAmount)} × {selectedIds.length} = {formatCurrency(bulkFeeAmount * selectedIds.length)}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <Button variant="outline" onClick={() => setIsBulkFeeOpen(false)} disabled={isBulkFeeSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleBulkFeeAssign}
+                  disabled={isBulkFeeSubmitting || bulkFeeAmount <= 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                >
+                  {isBulkFeeSubmitting
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <><CreditCard className="h-4 w-4" /> Assign Fee to All</>}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* ── Delete Confirm ────────────────────────────────────────────────── */}
       <ConfirmDialog

@@ -6,7 +6,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   Plus, Edit2, Trash2, Loader2,
-  Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays,
+  Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays, ChevronDown,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -27,6 +27,14 @@ import { toast } from 'sonner';
 function getCurrentMonthLabel(): string {
   return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+// Generate years from 2020 to 2050
+const YEARS = Array.from({ length: 31 }, (_, i) => 2020 + i);
 
 export default function AcademyStudentsPage() {
   const { user, hasRole } = useAuth();
@@ -49,6 +57,9 @@ export default function AcademyStudentsPage() {
   // Analysis Filter State
   const currentMonthLabel = useMemo(() => getCurrentMonthLabel(), []);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthLabel);
+
+  // Split selectedMonth for UI
+  const [monthPart, yearPart] = selectedMonth ? selectedMonth.split(' ') : getCurrentMonthLabel().split(' ');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -125,12 +136,13 @@ export default function AcademyStudentsPage() {
   const inactiveCount = students.filter((s) => s.status !== 'active').length;
 
   // --- Financial Analysis ---
-  const availableMonths = Array.from(new Set(invoices.map((inv) => inv.month))).filter(Boolean);
-  if (!availableMonths.includes(currentMonthLabel)) {
-    availableMonths.unshift(currentMonthLabel);
-  }
-
-  const monthInvoices = invoices.filter((inv) => inv.month === selectedMonth);
+  const monthInvoices = invoices.filter((inv) => {
+    let mStr = (inv.month || '').toLowerCase();
+    if (!mStr && inv.createdAt) {
+      mStr = new Date(inv.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+    }
+    return mStr.includes(monthPart.toLowerCase()) && mStr.includes(yearPart.toString());
+  });
   const totalBilled = monthInvoices.reduce((sum, inv) => sum + inv.grandTotal, 0);
   const totalCollected = monthInvoices.reduce((sum, inv) => sum + (inv.paidAmount || 0), 0);
   const totalDue = totalBilled - totalCollected;
@@ -403,15 +415,32 @@ export default function AcademyStudentsPage() {
               <h3 className="text-lg font-bold text-slate-800">Financial Analysis</h3>
               <p className="text-sm text-slate-500">Track fee collections and due amounts for Academy students.</p>
             </div>
-            <select
-              className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-            >
-              {availableMonths.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <div className="relative">
+                <select
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
+                  value={monthPart}
+                  onChange={(e) => setSelectedMonth(`${e.target.value} ${yearPart}`)}
+                >
+                  {MONTHS.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-violet-500 pointer-events-none" />
+              </div>
+              <div className="relative">
+                <select
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
+                  value={yearPart}
+                  onChange={(e) => setSelectedMonth(`${monthPart} ${e.target.value}`)}
+                >
+                  {YEARS.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-violet-500 pointer-events-none" />
+              </div>
+            </div>
           </div>
 
           {/* Analysis Cards */}
