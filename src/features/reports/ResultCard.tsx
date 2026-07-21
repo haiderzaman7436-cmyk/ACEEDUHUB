@@ -111,7 +111,7 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
 
                         <p className="text-blue-800 font-bold text-lg mb-2">Registration No: {student.admissionNumber || 'ACE/2026/REG'}</p>
                         <div className="inline-block bg-blue-900 text-white font-bold px-6 py-1 rounded-sm text-lg">
-                          Main Campus, Education City 0300-1234567
+                          Main Campus, Education City +923007412320
                         </div>
                       </div>
 
