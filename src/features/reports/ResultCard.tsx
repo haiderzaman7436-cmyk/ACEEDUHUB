@@ -59,20 +59,25 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                 display: none !important;
               }
               .print-break-after {
+                break-after: page;
                 page-break-after: always;
+              }
+              @page {
+                size: A4;
+                margin: 0;
               }
             }
           `}</style>
 
-          <div className="flex flex-col gap-8 print:gap-0">
+          <div className="flex flex-col gap-8 print:block print:gap-0">
             {data.map(({ student, termResults }, studentIndex) => (
-              <div key={student.id} className="flex flex-col gap-8 print:gap-0">
+              <div key={student.id} className="flex flex-col gap-8 print:block print:gap-0">
                 {termResults.map((term, termIndex) => {
                   const isLastPage = studentIndex === data.length - 1 && termIndex === termResults.length - 1;
                   return (
                   <div 
                     key={term.id} 
-                    className={`max-w-4xl mx-auto p-8 bg-blue-50/30 border-[12px] border-blue-900 font-sans shadow-lg print:shadow-none print:border-[12px] print:w-[210mm] print:h-[297mm] print:box-border relative ${!isLastPage ? 'print-break-after' : ''}`}
+                    className={`max-w-4xl mx-auto p-8 bg-blue-50/30 border-[12px] border-blue-900 font-sans shadow-lg print:shadow-none print:border-[12px] print:w-[210mm] print:h-[297mm] print:box-border relative print:break-inside-avoid ${!isLastPage ? 'print-break-after' : ''}`}
                   >
                     {/* Watermark Background */}
                     <div style={{
