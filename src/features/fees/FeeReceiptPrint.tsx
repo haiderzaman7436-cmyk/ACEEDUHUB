@@ -8,7 +8,7 @@ import { Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Invoice, Student, Fee } from '@/types';
 import { APP_NAME } from '@/lib/constants';
-import logoImg from '@/assets/logo.jpeg';
+import logoImg from '@/assets/logo.png';
 
 
 interface FeeReceiptPrintProps {
@@ -132,7 +132,7 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
           <style>
             .logo-circle img { width: 100%; height: 100%; object-fit: cover; }
           </style>
-          ${content.innerHTML.replace(/src="[^"]*logo[^"]*"/g, `src="${window.location.origin + '/logo.jpeg'}"`)}
+          ${content.innerHTML.replace(/src="[^"]*logo[^"]*"/g, `src="${window.location.origin + '/logo.png'}"`)}
         </body>
       </html>
     `);

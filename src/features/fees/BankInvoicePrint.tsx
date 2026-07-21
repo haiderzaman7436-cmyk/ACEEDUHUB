@@ -7,7 +7,7 @@ import { useRef } from 'react';
 import { Printer, X } from 'lucide-react';
 import type { Invoice, Student } from '@/types';
 import { APP_NAME } from '@/lib/constants';
-import logoImg from '@/assets/logo.jpeg';
+import logoImg from '@/assets/logo.png';
 
 interface BankInvoicePrintProps {
   invoice: Invoice;
@@ -59,30 +59,30 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
     new Date(invoice.dueDate).toLocaleDateString('en-PK', { month: 'long', year: 'numeric' });
 
   // ── Print handler ─────────────────────────────────────────────────────────
-  const handlePrint = () => {
+    const handlePrint = () => {
     const content = printRef.current;
     if (!content) return;
     const w = window.open('', '_blank', 'width=850,height=1150');
     if (!w) return;
-    const logoUrl = window.location.origin + '/logo.jpeg';
+    const logoUrl = window.location.origin + '/logo.png';
 
     w.document.write(`
       <html>
         <head>
           <title>Fee Challan — ${student.firstName} ${student.lastName}</title>
           <style>
-            @page { size: A4 portrait; margin: 5mm 7mm; }
+            @page { size: A4 portrait; margin: 3mm 5mm; }
             * { margin:0; padding:0; box-sizing:border-box; }
-            body { font-family: Arial, sans-serif; font-size: 9px; color: #1a1a1a; }
+            body { font-family: Arial, sans-serif; font-size: 8.5px; color: #1a1a1a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             img  { display:block; }
 
-            .challan { border:1.5px solid #1d4ed8; border-radius:5px; padding:7px 9px; margin-bottom:0; }
+            .challan { border:1.5px solid #1d4ed8; border-radius:5px; padding:5px 7px; margin-bottom:0; }
 
             /* Scissor cut-line separator between copies */
             .cut-line {
               display: flex;
               align-items: center;
-              margin: 6px 0;
+              margin: 4px 0;
               gap: 6px;
               color: #94a3b8;
               font-size: 13px;
@@ -96,27 +96,27 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
 
             /* Top header */
             .ch-head { display:flex; justify-content:space-between; align-items:center;
-                        border-bottom:1.5px solid #c7d2fe; padding-bottom:5px; margin-bottom:5px; }
-            .logo-block { display:flex; align-items:center; gap:7px; }
-            .logo-img   { width:34px; height:34px; border-radius:50%; object-fit:cover; border:2px solid #1d4ed8; }
-            .school-name{ font-size:13px; font-weight:900; color:#1e3a8a; line-height:1.2; }
-            .school-sub { font-size:7.5px; color:#475569; }
-            .copy-stamp { font-size:10px; font-weight:900; padding:3px 10px; border-radius:4px;
+                        border-bottom:1.5px solid #c7d2fe; padding-bottom:4px; margin-bottom:4px; }
+            .logo-block { display:flex; align-items:center; gap:5px; }
+            .logo-img   { width:30px; height:30px; border-radius:50%; object-fit:cover; border:2px solid #1d4ed8; }
+            .school-name{ font-size:12px; font-weight:900; color:#1e3a8a; line-height:1.1; }
+            .school-sub { font-size:7px; color:#475569; }
+            .copy-stamp { font-size:9px; font-weight:900; padding:2px 8px; border-radius:4px;
                           border:1.5px solid; display:inline-block; }
 
             /* Body: info + fee table */
-            .ch-body { display:flex; gap:8px; }
+            .ch-body { display:flex; gap:6px; }
 
             /* Student info */
             .info-col { flex:1; }
-            .info-row { display:flex; margin-bottom:2px; font-size:8.5px; }
-            .info-lbl { color:#64748b; min-width:78px; }
+            .info-row { display:flex; margin-bottom:1.5px; font-size:8px; }
+            .info-lbl { color:#64748b; min-width:72px; }
             .info-val { font-weight:700; color:#1e3a8a; }
 
             /* Fee table */
-            .fee-col { min-width:185px; }
+            .fee-col { min-width:180px; }
             table   { border-collapse:collapse; width:100%; }
-            th, td  { border:1px solid #e2e8f0; padding:2px 5px; font-size:8px; }
+            th, td  { border:1px solid #e2e8f0; padding:1.5px 4px; font-size:7.5px; }
             thead tr{ background:#e0e7ff; }
             th      { color:#1e3a8a; font-weight:700; }
 
@@ -126,9 +126,9 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
             .row-bal    { background:#fff1f2; font-weight:800; color:#dc2626; }
 
             /* Signature line */
-            .sig-row { display:flex; justify-content:space-between; margin-top:6px;
-                        border-top:1px dashed #cbd5e1; padding-top:4px; font-size:7.5px; color:#64748b; }
-            .sig-line { border-bottom:1px solid #94a3b8; width:90px; display:inline-block; margin-top:8px; }
+            .sig-row { display:flex; justify-content:space-between; margin-top:4px;
+                        border-top:1px dashed #cbd5e1; padding-top:3px; font-size:7px; color:#64748b; }
+            .sig-line { border-bottom:1px solid #94a3b8; width:80px; display:inline-block; margin-top:6px; }
           </style>
         </head>
         <body>
@@ -156,34 +156,33 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
           pageBreakInside: 'avoid',
         }}
       >
-        {/* ── Header ── */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
-                      borderBottom: `1.5px solid ${copy.badgeBg}`, paddingBottom:'5px', marginBottom:'5px' }}>
+                      borderBottom: `1.5px solid ${copy.badgeBg}`, paddingBottom:'4px', marginBottom:'4px' }}>
           {/* Logo + School */}
-          <div style={{ display:'flex', alignItems:'center', gap:'7px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'5px' }}>
             <img
               src={logoImg}
               alt="Logo"
-              style={{ width:'34px', height:'34px', borderRadius:'50%', objectFit:'cover',
+              style={{ width:'30px', height:'30px', borderRadius:'50%', objectFit:'cover',
                        border:`2px solid ${borderColor}`, flexShrink:0 }}
             />
             <div>
-              <div style={{ fontSize:'13px', fontWeight:900, color:'#1e3a8a', lineHeight:1.2 }}>{APP_NAME}</div>
-              <div style={{ fontSize:'7.5px', color:'#475569' }}>The School of Science &amp; Arts</div>
-              <div style={{ fontSize:'7px', color:'#64748b' }}>{SCHOOL_ADDRESS} | {SCHOOL_PHONE}</div>
+              <div style={{ fontSize:'12px', fontWeight:900, color:'#1e3a8a', lineHeight:1.1 }}>{APP_NAME}</div>
+              <div style={{ fontSize:'7px', color:'#475569' }}>The School of Science &amp; Arts</div>
+              <div style={{ fontSize:'6.5px', color:'#64748b' }}>{SCHOOL_ADDRESS} | {SCHOOL_PHONE}</div>
             </div>
           </div>
           {/* Copy stamp */}
           <div style={{ textAlign:'right' }}>
             <div style={{
-              display:'inline-block', fontSize:'10px', fontWeight:900,
-              padding:'3px 12px', borderRadius:'4px',
+              display:'inline-block', fontSize:'9px', fontWeight:900,
+              padding:'2px 8px', borderRadius:'4px',
               border: `1.5px solid ${borderColor}`,
               background: copy.badgeBg, color: copy.badgeText,
             }}>
               {copy.label}
             </div>
-            <div style={{ fontSize:'7.5px', color:'#64748b', marginTop:'3px' }}>
+            <div style={{ fontSize:'7px', color:'#64748b', marginTop:'2px' }}>
               Invoice: <strong style={{ color:'#1e3a8a' }}>{invoice.invoiceNumber}</strong>
             </div>
           </div>
@@ -210,14 +209,14 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
             ))}
 
             {/* Signature block */}
-            <div style={{ display:'flex', justifyContent:'space-between', marginTop:'8px',
-                          borderTop:'1px dashed #cbd5e1', paddingTop:'5px', fontSize:'7.5px', color:'#64748b' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginTop:'6px',
+                          borderTop:'1px dashed #cbd5e1', paddingTop:'4px', fontSize:'7px', color:'#64748b' }}>
               <div>
-                <div style={{ borderBottom:'1px solid #94a3b8', width:'90px', marginTop:'14px' }} />
+                <div style={{ borderBottom:'1px solid #94a3b8', width:'80px', marginTop:'10px' }} />
                 <div>Parent / Guardian Signature</div>
               </div>
               <div style={{ textAlign:'right' }}>
-                <div style={{ borderBottom:'1px solid #94a3b8', width:'90px', marginTop:'14px' }} />
+                <div style={{ borderBottom:'1px solid #94a3b8', width:'80px', marginTop:'10px' }} />
                 <div>Accounts Officer</div>
               </div>
             </div>
@@ -342,13 +341,13 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
-                      margin: '6px 0',
+                      gap: '4px',
+                      margin: '2px 0',
                       color: '#94a3b8',
                       fontSize: '11px',
                     }}>
                       <div style={{ flex:1, borderTop:'1.5px dashed #94a3b8' }} />
-                      <span style={{ transform:'rotate(-90deg)', display:'inline-block', userSelect:'none', fontSize:'14px' }}>✂</span>
+                      <span style={{ transform:'rotate(-90deg)', display:'inline-block', userSelect:'none', fontSize:'12px' }}>✂</span>
                       <div style={{ flex:1, borderTop:'1.5px dashed #94a3b8' }} />
                     </div>
                   )}

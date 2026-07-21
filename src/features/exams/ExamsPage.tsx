@@ -18,9 +18,10 @@ import {
   getExamResults, saveExamResult, computeGrade, computeClassAnalytics,
 } from './examService';
 import { getStudents } from '@/features/students/studentService';
-import type { ExamTermResult, SubjectMark, TermType } from '@/types';
+import type { ExamTermResult, SubjectMark, TermType, Student } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import { toast } from 'sonner';
+import { ResultCard } from '@/features/reports/ResultCard';
 
 type TabType = 'enter' | 'results' | 'analytics';
 
@@ -85,6 +86,8 @@ export default function ExamsPage() {
   const [resultsTerm, setResultsTerm] = useState<TermType>('1st_term');
   const [resultsYear, setResultsYear] = useState(getCurrentAcademicYear());
   const [searchQuery, setSearchQuery] = useState('');
+  const [printingResults, setPrintingResults] = useState<ExamTermResult[] | null>(null);
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
 
   // Analytics
   const analytics = computeClassAnalytics(results);
@@ -157,8 +160,12 @@ export default function ExamsPage() {
     if (!resultsClass) return;
     setIsLoadingResults(true);
     try {
-      const data = await getExamResults(resultsClass, resultsTerm, resultsYear);
+      const [data, studentsList] = await Promise.all([
+        getExamResults(resultsClass, resultsTerm, resultsYear),
+        getStudents()
+      ]);
       setResults(data);
+      setAllStudents(studentsList);
     } catch {
       toast.error('Failed to load results.');
     } finally {
@@ -258,69 +265,13 @@ export default function ExamsPage() {
   );
 
   const printResult = (result: ExamTermResult) => {
-    const w = window.open('', '_blank', 'width=800,height=1000');
-    if (!w) return;
-    const rows = result.subjects.map((sub) =>
-      `<tr>
-        <td style="padding:6px 10px;border:1px solid #e2e8f0;">${sub.subjectName}</td>
-        <td style="padding:6px 10px;border:1px solid #e2e8f0;text-align:center;">${sub.maxMarks}</td>
-        <td style="padding:6px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:700;color:${sub.obtainedMarks >= sub.maxMarks * 0.4 ? '#059669' : '#dc2626'};">${sub.obtainedMarks}</td>
-        <td style="padding:6px 10px;border:1px solid #e2e8f0;text-align:center;">${Math.round((sub.obtainedMarks / sub.maxMarks) * 100)}%</td>
-      </tr>`
-    ).join('');
-    w.document.write(`
-      <html><head><title>Result Card — ${result.studentName}</title>
-      <style>* { margin:0; padding:0; box-sizing:border-box; } body { font-family: Arial, sans-serif; font-size:12px; color:#1a1a1a; padding:20px; }</style>
-      </head><body>
-        <div style="border:2px solid #1d4ed8;border-radius:8px;padding:20px;max-width:700px;margin:auto;">
-          <div style="text-align:center;margin-bottom:16px;border-bottom:1px solid #e2e8f0;padding-bottom:12px;">
-            <h1 style="font-size:22px;font-weight:900;color:#1e3a8a;">ACE Educational Hub</h1>
-            <h2 style="font-size:14px;font-weight:700;color:#334155;margin-top:4px;">RESULT CARD — ${TERMS.find(t => t.value === result.term)?.label || result.term}</h2>
-            <p style="font-size:11px;color:#64748b;margin-top:2px;">Academic Year: ${result.academicYear}</p>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:11px;">
-            <div><b>Student:</b> ${result.studentName}</div>
-            <div><b>Adm No:</b> ${result.admissionNumber}</div>
-            <div><b>Class:</b> ${result.className} — Sec ${result.section}</div>
-            <div><b>Academic Year:</b> ${result.academicYear}</div>
-          </div>
-          <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px;">
-            <thead><tr style="background:#dbeafe;">
-              <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:left;">Subject</th>
-              <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;">Max Marks</th>
-              <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;">Obtained</th>
-              <th style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;">Percentage</th>
-            </tr></thead>
-            <tbody>${rows}</tbody>
-            <tfoot><tr style="background:#f0fdf4;">
-              <td style="padding:8px 10px;border:1px solid #e2e8f0;font-weight:800;">TOTAL</td>
-              <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:800;">${result.totalMaxMarks}</td>
-              <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:900;color:#1d4ed8;">${result.totalObtainedMarks}</td>
-              <td style="padding:8px 10px;border:1px solid #e2e8f0;text-align:center;font-weight:900;">${result.percentage}%</td>
-            </tfoot>
-          </table>
-          <div style="display:flex;gap:12px;justify-content:center;">
-            <div style="text-align:center;background:#dbeafe;border-radius:8px;padding:10px 20px;">
-              <div style="font-size:20px;font-weight:900;color:#1e3a8a;">${result.grade}</div>
-              <div style="font-size:10px;color:#64748b;">Grade</div>
-            </div>
-            <div style="text-align:center;background:${result.status === 'pass' ? '#dcfce7' : '#fee2e2'};border-radius:8px;padding:10px 20px;">
-              <div style="font-size:16px;font-weight:900;color:${result.status === 'pass' ? '#166534' : '#991b1b'};">${result.status.toUpperCase()}</div>
-              <div style="font-size:10px;color:#64748b;">Result</div>
-            </div>
-            <div style="text-align:center;background:#f8fafc;border-radius:8px;padding:10px 20px;">
-              <div style="font-size:16px;font-weight:900;color:#334155;">${result.percentage}%</div>
-              <div style="font-size:10px;color:#64748b;">Percentage</div>
-            </div>
-          </div>
-          <div style="margin-top:20px;text-align:center;font-size:9px;color:#94a3b8;border-top:1px dashed #e2e8f0;padding-top:10px;">
-            Computer-generated result card — ACE Educational Hub | Exam: ${TERMS.find(t => t.value === result.term)?.label}
-          </div>
-        </div>
-      </body></html>
-    `);
-    w.document.close();
-    w.print();
+    setPrintingResults([result]);
+  };
+
+  const printAllFiltered = () => {
+    if (filteredResults.length > 0) {
+      setPrintingResults(filteredResults);
+    }
   };
 
   const tabs = [
@@ -601,6 +552,12 @@ export default function ExamsPage() {
                   placeholder="Search student..."
                   className="border-slate-200 h-10 w-48"
                 />
+                {filteredResults.length > 0 && (
+                  <Button onClick={printAllFiltered} className="bg-blue-800 hover:bg-blue-900 text-white gap-2 h-10 ml-auto">
+                    <Printer className="h-4 w-4" />
+                    Print All ({filteredResults.length})
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -853,6 +810,29 @@ export default function ExamsPage() {
             </Card>
           )}
         </div>
+      )}
+
+      {/* ── PRINTING MODAL ──────────────────────────────────────────────── */}
+      {printingResults && printingResults.length > 0 && (
+        <ResultCard
+          data={printingResults.map(res => {
+            const realStudent = allStudents.find(s => s.id === res.studentId);
+            return {
+              student: realStudent || {
+                id: res.studentId,
+                firstName: res.studentName.split(' ')[0] || '',
+                lastName: res.studentName.split(' ').slice(1).join(' ') || '',
+                className: res.className,
+                admissionNumber: res.admissionNumber,
+                status: 'active',
+                gender: 'other',
+                category: 'school'
+              } as Student,
+              termResults: [res]
+            };
+          })}
+          onClose={() => setPrintingResults(null)}
+        />
       )}
     </div>
   );

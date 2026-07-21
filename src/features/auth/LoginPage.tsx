@@ -7,7 +7,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthContext';
 import { Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
-import logoImg from '@/assets/logo.jpeg';
+import logoImg from '@/assets/logo.png';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');

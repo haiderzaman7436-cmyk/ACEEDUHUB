@@ -1009,8 +1009,10 @@ export default function ReportsPage() {
       {/* Result Card Modal */}
       {showResultCard && selectedStudentData && (
         <ResultCard
-          student={selectedStudentData}
-          termResults={termResults}
+          data={[{
+            student: selectedStudentData,
+            termResults: termResults
+          }]}
           onClose={() => setShowResultCard(false)}
         />
       )}

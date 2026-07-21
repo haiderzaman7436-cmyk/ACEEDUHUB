@@ -19,7 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthContext';
 import { BankInvoicePrint } from '@/features/fees/BankInvoicePrint';
-import logoImg from '@/assets/logo.jpeg';
+import logoImg from '@/assets/logo.png';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -91,7 +91,7 @@ export default function InvoicesPage() {
   const handlePrintInvoice = (inv: Invoice) => {
     const w = window.open('', '_blank', 'width=850,height=1100');
     if (!w) return;
-    const logoUrl = window.location.origin + '/logo.jpeg';
+    const logoUrl = window.location.origin + '/logo.png';
     const itemRows = inv.items.map((item, i) => `
       <tr style="background:${i % 2 === 0 ? '#fff' : '#f8faff'}">
         <td style="padding:8px 12px;border:1px solid #e2e8f0">${item.description}</td>

@@ -249,6 +249,7 @@ export function StudentForm({
                 <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Category</label>
                 <select {...register('category')} className={selectCls}>
                   <option value="school">School</option>
+                  <option value="academy">Academy</option>
                 </select>
               </div>
               <div className="space-y-1.5">
@@ -397,7 +398,7 @@ export function StudentForm({
                 <Receipt className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                   Fees
-                  <span className="ml-2 normal-case font-normal text-[hsl(var(--muted-foreground))] text-[10px]">(Optional)</span>
+                  <span className="ml-2 normal-case font-normal text-[hsl(var(--muted-foreground))] text-[10px]"></span>
                 </h4>
               </div>
               <Button
