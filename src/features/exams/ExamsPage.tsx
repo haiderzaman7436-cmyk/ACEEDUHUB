@@ -116,6 +116,7 @@ export default function ExamsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [printingResults, setPrintingResults] = useState<ExamTermResult[] | null>(null);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [gradingType, setGradingType] = useState<'absolute' | 'relative'>('relative');
 
   // Analytics
   const analytics = computeClassAnalytics(results);
@@ -631,6 +632,17 @@ export default function ExamsPage() {
                     className="border-slate-200 w-32"
                   />
                 </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-600">Grading Type</label>
+                  <select
+                    value={gradingType}
+                    onChange={(e) => setGradingType(e.target.value as 'absolute' | 'relative')}
+                    className="h-10 rounded-xl border border-slate-200 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="relative">Relative</option>
+                    <option value="absolute">Absolute</option>
+                  </select>
+                </div>
                 <Button onClick={loadResults} disabled={!resultsClass || isLoadingResults} className="bg-blue-600 hover:bg-blue-700 text-white gap-2 h-10">
                   {isLoadingResults ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />}
                   Load Results
@@ -691,10 +703,12 @@ export default function ExamsPage() {
                         <td className="px-3 py-3 text-center font-semibold text-slate-700">
                           {res.totalObtainedMarks}/{res.totalMaxMarks}
                         </td>
-                        <td className="px-3 py-3 text-center font-bold text-blue-700">{res.relativePercentage ?? res.percentage}%</td>
+                        <td className="px-3 py-3 text-center font-bold text-blue-700">
+                          {gradingType === 'relative' && res.relativePercentage !== undefined ? res.relativePercentage : res.percentage}%
+                        </td>
                         <td className="px-3 py-3 text-center">
-                          <Badge className={`text-xs font-bold ${getGradeColor(res.relativeGrade || res.grade)}`}>
-                            {res.relativeGrade || res.grade}
+                          <Badge className={`text-xs font-bold ${getGradeColor(gradingType === 'relative' ? (res.relativeGrade || res.grade) : res.grade)}`}>
+                            {gradingType === 'relative' ? (res.relativeGrade || res.grade) : res.grade}
                           </Badge>
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -923,6 +937,7 @@ export default function ExamsPage() {
             };
           })}
           onClose={() => setPrintingResults(null)}
+          gradingType={gradingType}
         />
       )}
     </div>

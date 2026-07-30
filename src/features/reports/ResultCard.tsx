@@ -13,6 +13,7 @@ export interface StudentResultData {
 interface ResultCardProps {
   data: StudentResultData[];
   onClose: () => void;
+  gradingType?: 'absolute' | 'relative';
 }
 
 const TERM_LABEL: Record<string, string> = {
@@ -38,7 +39,7 @@ const getRemarks = (percentage: number) => {
   return 'Fail. Needs serious improvement!';
 };
 
-export function ResultCard({ data, onClose }: ResultCardProps) {
+export function ResultCard({ data, onClose, gradingType = 'relative' }: ResultCardProps) {
   // If data is empty, just treat as sample (won't render much)
   const isSample = data.length > 0 && data[0].termResults.every((t) => t.totalObtainedMarks === 0);
 
@@ -314,10 +315,10 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                       {!isSample && term.totalMaxMarks > 0 ? (term.percentage >= 40 ? 'Pass' : 'Fail') : ''}
                     </span>
                     <span>The Exam With Grade</span>
-                    <span className="flex-1 border-b border-dotted border-blue-900 mx-2 relative top-[-4px] text-center text-black text-xs font-bold">
+                    <span className="flex-1 border-b border-dotted border-blue-900 mx-2 relative top-[-4px] text-center text-black font-bold">
                       {!isSample && term.totalMaxMarks > 0 ? 
-                        (term.relativePercentage 
-                          ? `Abs: ${term.percentage}% (${getGrade(term.percentage)}) | Rel: ${term.relativePercentage}% (${getGrade(term.relativePercentage)})` 
+                        (gradingType === 'relative' && term.relativePercentage !== undefined 
+                          ? `${term.relativePercentage}% (${getGrade(term.relativePercentage)})` 
                           : `${term.percentage}% (${getGrade(term.percentage)})`
                         ) 
                       : ''}
