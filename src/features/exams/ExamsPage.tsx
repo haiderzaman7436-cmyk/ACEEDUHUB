@@ -73,9 +73,7 @@ function getCurrentAcademicYear(): string {
 
 function getGradeColor(grade: string): string {
   const map: Record<string, string> = {
-    'A+': 'bg-emerald-100 text-emerald-700',
     'A': 'bg-green-100 text-green-700',
-    'B+': 'bg-blue-100 text-blue-700',
     'B': 'bg-blue-50 text-blue-600',
     'C': 'bg-amber-100 text-amber-700',
     'D': 'bg-orange-100 text-orange-700',
@@ -667,9 +665,8 @@ export default function ExamsPage() {
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Rank</th>
                       <th className="text-left px-4 py-3 font-semibold text-slate-500">Student</th>
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Total</th>
-                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Abs %</th>
-                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Rel %</th>
-                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Grade (Abs / Rel)</th>
+                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Percentage</th>
+                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Grade</th>
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Result</th>
                       <th className="text-right px-4 py-3 font-semibold text-slate-500">Actions</th>
                     </tr>
@@ -694,14 +691,11 @@ export default function ExamsPage() {
                         <td className="px-3 py-3 text-center font-semibold text-slate-700">
                           {res.totalObtainedMarks}/{res.totalMaxMarks}
                         </td>
-                        <td className="px-3 py-3 text-center font-bold text-slate-600">{res.percentage}%</td>
-                        <td className="px-3 py-3 text-center font-bold text-violet-700">{res.relativePercentage ?? '-'}%</td>
+                        <td className="px-3 py-3 text-center font-bold text-blue-700">{res.relativePercentage ?? res.percentage}%</td>
                         <td className="px-3 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
-                            <Badge className={`text-xs font-bold ${getGradeColor(res.grade)}`}>{res.grade}</Badge>
-                            <span className="text-slate-300">/</span>
-                            <Badge className={`text-xs font-bold ${getGradeColor(res.relativeGrade || res.grade)}`}>{res.relativeGrade || res.grade}</Badge>
-                          </div>
+                          <Badge className={`text-xs font-bold ${getGradeColor(res.relativeGrade || res.grade)}`}>
+                            {res.relativeGrade || res.grade}
+                          </Badge>
                         </td>
                         <td className="px-3 py-3 text-center">
                           {res.status === 'pass' ? (

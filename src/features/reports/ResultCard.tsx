@@ -22,8 +22,7 @@ const TERM_LABEL: Record<string, string> = {
 };
 
 const getGrade = (percentage: number) => {
-  if (percentage >= 80) return 'A+';
-  if (percentage >= 70) return 'A';
+  if (percentage >= 80) return 'A';
   if (percentage >= 60) return 'B';
   if (percentage >= 50) return 'C';
   if (percentage >= 40) return 'D';
