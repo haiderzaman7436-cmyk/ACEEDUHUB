@@ -7,7 +7,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthContext';
 import { NAV_ITEMS, APP_NAME } from '@/lib/constants';
 import { cn } from '@/lib/utils';
-import logoImg from '@/assets/logo.png';
+import logoImg from '@/assets/logo.webp';
 import {
   LayoutDashboard, GraduationCap, Users, BookOpen, DollarSign,
   Receipt, Package, UserPlus, BarChart3, Settings, ChevronDown,

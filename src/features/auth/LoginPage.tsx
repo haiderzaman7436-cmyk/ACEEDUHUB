@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/features/auth/AuthContext';
 import { Eye, EyeOff, Loader2, AlertCircle, Mail, Lock, ShieldCheck } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
-import logoImg from '@/assets/logo.png';
+import logoImg from '@/assets/logo.webp';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');

@@ -2,7 +2,7 @@
 import { Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { ExamTermResult, Student } from '@/types';
-import logoImg from '@/assets/logo.png';
+import logoImg from '@/assets/logo.webp';
 import { createPortal } from 'react-dom';
 
 export interface StudentResultData {
@@ -315,8 +315,13 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                       {!isSample && term.totalMaxMarks > 0 ? (term.percentage >= 40 ? 'Pass' : 'Fail') : ''}
                     </span>
                     <span>The Exam With Grade</span>
-                    <span className="flex-1 border-b border-dotted border-blue-900 mx-2 relative top-[-4px] text-center text-black">
-                      {!isSample && term.totalMaxMarks > 0 ? `${term.percentage.toFixed(0)}% (${getGrade(term.percentage)})` : ''}
+                    <span className="flex-1 border-b border-dotted border-blue-900 mx-2 relative top-[-4px] text-center text-black text-xs font-bold">
+                      {!isSample && term.totalMaxMarks > 0 ? 
+                        (term.relativePercentage 
+                          ? `Abs: ${term.percentage}% (${getGrade(term.percentage)}) | Rel: ${term.relativePercentage}% (${getGrade(term.relativePercentage)})` 
+                          : `${term.percentage}% (${getGrade(term.percentage)})`
+                        ) 
+                      : ''}
                     </span>
                   </div>
                   <div className="flex items-end">

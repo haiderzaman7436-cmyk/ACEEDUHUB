@@ -547,7 +547,9 @@ export interface ExamTermResult {
   totalMaxMarks: number;
   totalObtainedMarks: number;
   percentage: number;
+  relativePercentage?: number;
   grade: string;
+  relativeGrade?: string;
   status: 'pass' | 'fail';
   remarks?: string;
   createdAt: Date;

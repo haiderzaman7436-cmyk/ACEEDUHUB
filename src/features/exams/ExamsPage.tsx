@@ -230,6 +230,13 @@ export default function ExamsPage() {
     setIsSaving(true);
     try {
       let savedCount = 0;
+
+      // Auto Relative Grading (Highest Score Normalization)
+      const allObtained = markRows.map(row => 
+        subjects.reduce((s, sub) => s + (row.marks[sub]?.obtained || 0), 0)
+      );
+      const highestScoreInClass = Math.max(...allObtained, 1);
+
       for (const row of markRows) {
         const subjectMarks: SubjectMark[] = subjects.map((sub) => ({
           subjectName: sub,
@@ -238,8 +245,15 @@ export default function ExamsPage() {
         }));
         const totalMax = subjectMarks.reduce((s, sm) => s + sm.maxMarks, 0);
         const totalObtained = subjectMarks.reduce((s, sm) => s + sm.obtainedMarks, 0);
+        
+        // Absolute Grading
         const percentage = totalMax > 0 ? Math.round((totalObtained / totalMax) * 100) : 0;
         const grade = computeGrade(percentage);
+
+        // Relative Grading
+        const relativePercentage = Math.round((totalObtained / highestScoreInClass) * 100);
+        const relativeGrade = computeGrade(relativePercentage);
+
         const status: 'pass' | 'fail' = percentage >= 40 ? 'pass' : 'fail';
 
         await saveExamResult({
@@ -257,7 +271,9 @@ export default function ExamsPage() {
           totalMaxMarks: totalMax,
           totalObtainedMarks: totalObtained,
           percentage,
+          relativePercentage,
           grade,
+          relativeGrade,
           status,
           createdBy: user.uid || 'admin',
         }, user.uid || 'admin');
@@ -651,8 +667,9 @@ export default function ExamsPage() {
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Rank</th>
                       <th className="text-left px-4 py-3 font-semibold text-slate-500">Student</th>
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Total</th>
-                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Percentage</th>
-                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Grade</th>
+                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Abs %</th>
+                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Rel %</th>
+                      <th className="text-center px-3 py-3 font-semibold text-slate-500">Grade (Abs / Rel)</th>
                       <th className="text-center px-3 py-3 font-semibold text-slate-500">Result</th>
                       <th className="text-right px-4 py-3 font-semibold text-slate-500">Actions</th>
                     </tr>
@@ -677,9 +694,14 @@ export default function ExamsPage() {
                         <td className="px-3 py-3 text-center font-semibold text-slate-700">
                           {res.totalObtainedMarks}/{res.totalMaxMarks}
                         </td>
-                        <td className="px-3 py-3 text-center font-bold text-blue-700">{res.percentage}%</td>
+                        <td className="px-3 py-3 text-center font-bold text-slate-600">{res.percentage}%</td>
+                        <td className="px-3 py-3 text-center font-bold text-violet-700">{res.relativePercentage ?? '-'}%</td>
                         <td className="px-3 py-3 text-center">
-                          <Badge className={`text-xs font-bold ${getGradeColor(res.grade)}`}>{res.grade}</Badge>
+                          <div className="flex items-center justify-center gap-1">
+                            <Badge className={`text-xs font-bold ${getGradeColor(res.grade)}`}>{res.grade}</Badge>
+                            <span className="text-slate-300">/</span>
+                            <Badge className={`text-xs font-bold ${getGradeColor(res.relativeGrade || res.grade)}`}>{res.relativeGrade || res.grade}</Badge>
+                          </div>
                         </td>
                         <td className="px-3 py-3 text-center">
                           {res.status === 'pass' ? (

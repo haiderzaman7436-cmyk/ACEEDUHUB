@@ -7,7 +7,7 @@ import { useRef } from 'react';
 import { Printer, X } from 'lucide-react';
 import type { Invoice, Student } from '@/types';
 import { APP_NAME } from '@/lib/constants';
-import logoImg from '@/assets/logo.png';
+import logoImg from '@/assets/logo.webp';
 
 interface BankInvoicePrintProps {
   invoice: Invoice;
@@ -64,7 +64,7 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
     if (!content) return;
     const w = window.open('', '_blank', 'width=850,height=1150');
     if (!w) return;
-    const logoUrl = window.location.origin + '/logo.png';
+    const logoUrl = window.location.origin + '/logo.webp';
 
     w.document.write(`
       <html>
