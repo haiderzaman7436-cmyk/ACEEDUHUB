@@ -99,7 +99,7 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                   return (
                   <div 
                     key={term.id} 
-                    className={`max-w-4xl mx-auto p-8 bg-blue-50/30 border-[12px] border-blue-900 font-sans shadow-lg print:shadow-none print:border-[12px] print:w-full print:h-[275mm] print:box-border relative print:break-inside-avoid ${!isLastPage ? 'print-break-after' : ''}`}
+                    className={`max-w-4xl mx-auto p-8 bg-blue-50/30 border-[12px] border-blue-900 font-sans shadow-lg print:shadow-none print:border-[12px] print:w-[210mm] print:h-[296.5mm] print:m-0 print:p-8 print:box-border relative print:break-inside-avoid flex flex-col justify-between ${!isLastPage ? 'print-break-after' : ''}`}
                   >
                     {/* Watermark Background */}
                     <div style={{
@@ -118,7 +118,7 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                       zIndex: 0
                     }} />
 
-                    <div className="relative z-10">
+                    <div className="relative z-10 flex flex-col h-full flex-1">
                       {/* Header Section */}
                       <div className="text-center mb-6">
                         <h2 className="text-2xl font-bold italic mb-2 tracking-widest text-blue-950">RESULT CARD</h2>
@@ -333,7 +333,7 @@ export function ResultCard({ data, onClose }: ResultCardProps) {
                 </div>
 
                 {/* Signatures */}
-                <div className="flex justify-between mt-12 text-sm italic text-blue-900 font-bold">
+                <div className="flex justify-between mt-auto pt-8 text-sm italic text-blue-900 font-bold">
                   <div className="text-center">
                     <div className="w-48 border-b border-dotted border-blue-900 mb-1"></div>
                     <div>Teacher's Signature</div>
