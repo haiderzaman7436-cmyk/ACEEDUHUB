@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  Eye, X, CreditCard, Loader2, CheckCircle2, RefreshCw,
-  Landmark, Receipt, Banknote, Printer,
+  Eye, X, CreditCard, Loader2, CheckCircle2,
+  Plus, Receipt, Banknote, Printer, MessageCircle, ShoppingCart
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,15 +10,18 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
-  getInvoices, payInvoice, generateMonthlyFeesForAll,
+  getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
 } from '@/features/fees/feeService';
+import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
+import { BulkWhatsAppModal } from '@/features/fees/BulkWhatsAppModal';
 import type { Invoice, Student } from '@/types';
 import { toast } from 'sonner';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { APP_NAME } from '@/lib/constants';
 import { useAuth } from '@/features/auth/AuthContext';
 import { BankInvoicePrint } from '@/features/fees/BankInvoicePrint';
+import { AddInventoryToInvoiceModal } from './AddInventoryToInvoiceModal';
 import logoImg from '@/assets/logo.webp';
 
 const MONTHS = [
@@ -56,6 +59,8 @@ export default function InvoicesPage() {
   const [challanInvoice, setChallanInvoice] = useState<Invoice | null>(null);
   const [challanStudent, setChallanStudent] = useState<Student | null>(null);
   const [isLoadingChallan, setIsLoadingChallan] = useState(false);
+  const [isBulkAlertOpen, setIsBulkAlertOpen] = useState(false);
+  const [inventoryModalInvoice, setInventoryModalInvoice] = useState<Invoice | null>(null);
 
   // Pay modal
   const [isPayOpen, setIsPayOpen] = useState(false);
@@ -76,10 +81,11 @@ export default function InvoicesPage() {
 
   const loadInvoices = useCallback(() => {
     setIsLoading(true);
-    getInvoices()
+    const fetchPromise = showAllMonths ? getInvoices() : getInvoicesByMonth(selectedMonth);
+    fetchPromise
       .then((data) => setInvoices(data))
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [showAllMonths, selectedMonth]);
 
   useEffect(() => { loadInvoices(); }, [loadInvoices]);
 
@@ -249,17 +255,13 @@ export default function InvoicesPage() {
     }
   };
 
-  // Filter logic
+
+
   const filteredInvoices = invoices.filter((inv) => {
-    let mStr = (inv.month || '').toLowerCase();
-    if (!mStr && inv.createdAt) {
-      mStr = new Date(inv.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
-    }
-    const matchesMonth = showAllMonths || (mStr.includes(monthPart.toLowerCase()) && mStr.includes(yearPart.toString()));
     const matchesClass = !classFilter || inv.className.toLowerCase() === classFilter.toLowerCase();
     const matchesCategory = !categoryFilter || (inv.category || 'school').toLowerCase() === categoryFilter.toLowerCase();
     const matchesStatus = !statusFilter || inv.status === statusFilter;
-    return matchesMonth && matchesClass && matchesCategory && matchesStatus;
+    return matchesClass && matchesCategory && matchesStatus;
   });
 
   // Summary for current view
@@ -351,6 +353,19 @@ export default function InvoicesPage() {
             <Eye className="h-4 w-4" />
           </Button>
 
+          {/* Add Inventory */}
+          {item.status !== 'paid' && item.status !== 'cancelled' && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+              onClick={() => setInventoryModalInvoice(item)}
+              title="Add Inventory (Books, Uniforms, Stationery)"
+            >
+              <ShoppingCart className="h-4 w-4" />
+            </Button>
+          )}
+
           {/* Fee Challan 3-copy */}
           <Button
             size="sm"
@@ -375,6 +390,29 @@ export default function InvoicesPage() {
               Pay
             </Button>
           )}
+          {item.status === 'overdue' && !item.alertSentAt && (
+            <Button
+              size="sm"
+              onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
+              className="h-8 gap-1.5 text-xs bg-green-500 hover:bg-green-600 text-white"
+              title="Send WhatsApp Alert"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Alert
+            </Button>
+          )}
+          {item.status === 'overdue' && item.alertSentAt && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
+              className="h-8 gap-1.5 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+              title="Resend WhatsApp Alert"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Sent
+            </Button>
+          )}
           {item.status === 'paid' && (
             <span className="flex items-center gap-1 text-xs text-emerald-600 font-semibold px-2 py-1 bg-emerald-50 rounded-lg">
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -397,15 +435,40 @@ export default function InvoicesPage() {
         />
       )}
 
+      {/* Add Inventory to Invoice Modal */}
+      {inventoryModalInvoice && (
+        <AddInventoryToInvoiceModal
+          invoice={inventoryModalInvoice}
+          onClose={() => setInventoryModalInvoice(null)}
+          onSuccess={(updatedInvoice) => {
+            setInvoices(invoices.map(inv => inv.id === updatedInvoice.id ? updatedInvoice : inv));
+            if (selectedInvoice?.id === updatedInvoice.id) {
+              setSelectedInvoice(updatedInvoice);
+            }
+          }}
+        />
+      )}
+
       <PageHeader
         title="Invoices & Billing"
         description="View fee invoices, track payment status, and print bank challans."
-        action={{
-          label: 'Refresh',
-          onClick: loadInvoices,
-          icon: <RefreshCw className="h-4 w-4" />,
-        }}
+        action={
+          hasRole(['admin', 'manager']) ? {
+            label: 'Bulk Send Alerts',
+            icon: <MessageCircle className="h-4 w-4" />,
+            onClick: () => setIsBulkAlertOpen(true),
+          } : undefined
+        }
       />
+
+      {isBulkAlertOpen && (
+        <BulkWhatsAppModal 
+          records={filteredInvoices} 
+          type="Invoice" 
+          onClose={() => setIsBulkAlertOpen(false)} 
+          onAlertSent={loadInvoices}
+        />
+      )}
 
       {/* Pay Invoice Modal */}
       {isPayOpen && payInvTarget && (
@@ -501,10 +564,23 @@ export default function InvoicesPage() {
                   <p className="text-xs text-blue-200">{selectedInvoice.invoiceNumber}</p>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap justify-end">
+                  {selectedInvoice.status !== 'paid' && selectedInvoice.status !== 'cancelled' && (
+                    <Button 
+                      size="sm" 
+                      onClick={() => {
+                        setIsPreviewOpen(false);
+                        setInventoryModalInvoice(selectedInvoice);
+                      }}
+                      className="h-9 px-4 gap-1.5 text-sm bg-white text-black font-extrabold hover:bg-slate-100 shadow-lg rounded-lg"
+                    >
+                      <ShoppingCart className="h-4 w-4" />
+                      Add Inventory
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     onClick={() => handlePrintInvoice(selectedInvoice)}
-                    className="h-9 px-4 gap-1.5 text-sm bg-amber-400 hover:bg-amber-500 text-slate-900 font-extrabold shadow-lg rounded-lg"
+                    className="h-9 px-4 gap-1.5 text-sm bg-amber-400 hover:bg-amber-500 text-black font-extrabold shadow-lg rounded-lg"
                   >
                     <Printer className="h-4 w-4" />
                     Print Invoice
@@ -512,7 +588,7 @@ export default function InvoicesPage() {
                   <Button
                     size="sm"
                     onClick={() => { setIsPreviewOpen(false); handleChallanClick(selectedInvoice); }}
-                    className="h-9 px-4 gap-1.5 text-sm bg-white text-blue-800 font-extrabold hover:bg-blue-50 shadow-lg rounded-lg"
+                    className="h-9 px-4 gap-1.5 text-sm bg-white text-black font-extrabold hover:bg-slate-100 shadow-lg rounded-lg"
                   >
                     <Banknote className="h-4 w-4" />
                     Print Challan
@@ -753,13 +829,13 @@ export default function InvoicesPage() {
                 ))}
               </select>
 
-              {/* Generate Monthly Fees */}
+              {/* Generate */}
               <Button
                 onClick={handleGenerateMonthlyFees}
-                disabled={isSubmitting}
-                className="h-9 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl"
+                disabled={isSubmitting || isLoading}
+                className="h-10 gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow"
               >
-                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Landmark className="h-4 w-4" />}
+                {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                 Generate Monthly Fees
               </Button>
             </div>

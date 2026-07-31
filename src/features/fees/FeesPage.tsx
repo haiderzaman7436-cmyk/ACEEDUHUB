@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   CreditCard, X, Loader2, AlertCircle, CheckCircle2, Clock,
-  RefreshCw, ChevronDown, Users, TrendingUp, CalendarDays, History,
+  ChevronDown, Users, TrendingUp, CalendarDays, History, MessageCircle,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,9 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
-  getFees, getAvailableFeeMonths,
+  getFees, getFeesByMonth,
   recordPayment, getFeesByStudent,
 } from './feeService';
+import { sendWhatsAppAlert } from './whatsappService';
+import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import type { Fee } from '@/types';
 import { toast } from 'sonner';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -49,7 +51,6 @@ export default function FeesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthLabel());
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   const [showAllMonths, setShowAllMonths] = useState(false);
 
   // Pay Fee modal
@@ -58,6 +59,7 @@ export default function FeesPage() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isBulkAlertOpen, setIsBulkAlertOpen] = useState(false);
 
   // Student History modal
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -71,13 +73,12 @@ export default function FeesPage() {
   const loadFees = useCallback(async () => {
     setIsLoading(true);
     try {
-      const data = await getFees();
+      const data = showAllMonths ? await getFees() : await getFeesByMonth(selectedMonth);
       setFees(data);
-      getAvailableFeeMonths().then(setAvailableMonths).catch(() => {});
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [showAllMonths, selectedMonth]);
 
   useEffect(() => { loadFees(); }, [loadFees]);
 
@@ -122,17 +123,10 @@ export default function FeesPage() {
     }
   };
 
+
+
   const filteredFees = fees.filter((f) => {
-    const statusMatch = !statusFilter || f.status === statusFilter;
-    if (showAllMonths) return statusMatch;
-    
-    let mStr = (f.month || '').toLowerCase();
-    if (!mStr && f.createdAt) {
-      mStr = new Date(f.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
-    }
-    const matchesMonth = mStr.includes(monthPart.toLowerCase()) && mStr.includes(yearPart.toString());
-    
-    return statusMatch && matchesMonth;
+    return !statusFilter || f.status === statusFilter;
   });
 
   // Summary stats
@@ -241,6 +235,29 @@ export default function FeesPage() {
               Pay Fee
             </Button>
           )}
+          {item.status === 'overdue' && !item.alertSentAt && (
+            <Button
+              size="sm"
+              onClick={() => sendWhatsAppAlert(item, 'Fee').then(loadFees)}
+              className="h-8 gap-1.5 text-xs bg-green-500 hover:bg-green-600 text-white"
+              title="Send WhatsApp Alert"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Alert
+            </Button>
+          )}
+          {item.status === 'overdue' && item.alertSentAt && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => sendWhatsAppAlert(item, 'Fee').then(loadFees)}
+              className="h-8 gap-1.5 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+              title="Resend WhatsApp Alert"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              Sent
+            </Button>
+          )}
           {item.status === 'paid' && (
             <span className="flex items-center gap-1 text-xs text-emerald-600 font-semibold px-2 py-1 bg-emerald-50 rounded-lg">
               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -257,12 +274,23 @@ export default function FeesPage() {
       <PageHeader
         title="Fee Ledger"
         description="Monthly fee collection — select any month from 2020 onwards to see complete student fee analysis."
-        action={{
-          label: 'Refresh',
-          onClick: loadFees,
-          icon: <RefreshCw className="h-4 w-4" />,
-        }}
+        action={
+          hasRole(['admin', 'manager']) ? {
+            label: 'Bulk Send Alerts',
+            icon: <MessageCircle className="h-4 w-4" />,
+            onClick: () => setIsBulkAlertOpen(true),
+          } : undefined
+        }
       />
+
+      {isBulkAlertOpen && (
+        <BulkWhatsAppModal 
+          records={filteredFees} 
+          type="Fee" 
+          onClose={() => setIsBulkAlertOpen(false)} 
+          onAlertSent={loadFees}
+        />
+      )}
 
       {/* Month Selector Bar */}
       <Card className="border border-blue-100 shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50">
@@ -275,9 +303,7 @@ export default function FeesPage() {
               <div>
                 <div className="text-sm font-bold text-slate-800">Select Month</div>
                 <div className="text-[11px] text-slate-500">
-                  {availableMonths.length > 0
-                    ? `${availableMonths.length} months with data · History from 2020`
-                    : 'Full history available from January 2020'}
+                  Select a month to view its ledger. Full history available since 2020.
                 </div>
               </div>
             </div>

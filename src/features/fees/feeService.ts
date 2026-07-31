@@ -8,9 +8,38 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Fee, Invoice, FeeTemplate, Student } from '@/types';
-import { generateInvoiceNumber, generateReceiptNumber } from '@/lib/utils';
+import { generateReceiptNumber } from '@/lib/utils';
+import { getNextInvoiceNumber } from '@/lib/counterService';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+export function parseFeeStatus(data: any): string {
+  let status = data.status || 'pending';
+  if (status !== 'paid' && data.dueDate) {
+    const due = new Date(data.dueDate);
+    const now = new Date();
+    due.setHours(0, 0, 0, 0);
+    now.setHours(0, 0, 0, 0);
+    if (now > due) {
+      status = 'overdue';
+    }
+  }
+  return status;
+}
+
+export function parseInvoiceStatus(data: any): string {
+  let status = data.status || 'sent';
+  if (status !== 'paid' && status !== 'cancelled' && data.dueDate) {
+    const due = new Date(data.dueDate);
+    const now = new Date();
+    due.setHours(0, 0, 0, 0);
+    now.setHours(0, 0, 0, 0);
+    if (now > due) {
+      status = 'overdue';
+    }
+  }
+  return status;
+}
 
 function toDate(val: unknown): Date {
   if (!val) return new Date();
@@ -210,7 +239,7 @@ export async function assignCustomFeesForStudent(student: Student): Promise<void
 
 async function createCustomInvoice(student: Student, fee: Fee): Promise<void> {
   const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
-  const invNumber = generateInvoiceNumber();
+  const invNumber = await getNextInvoiceNumber();
   const now = new Date();
 
   const invoice: Invoice = {
@@ -272,7 +301,7 @@ async function createCustomInvoice(student: Student, fee: Fee): Promise<void> {
 
 async function createAutoInvoice(student: Student, fee: Fee): Promise<void> {
   const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
-  const invNumber = generateInvoiceNumber();
+  const invNumber = await getNextInvoiceNumber();
   const now = new Date();
 
   const invoice: Invoice = {
@@ -329,41 +358,71 @@ export async function getFees(): Promise<Fee[]> {
   return snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
+    status: parseFeeStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
   })) as Fee[];
 }
 
 export async function getFeesByMonth(monthLabel: string): Promise<Fee[]> {
-  const q = query(
-    collection(db, 'fees'),
-    where('month', '==', monthLabel),
-  );
-  const snap = await getDocs(q);
-  const results = snap.docs.map((d) => ({
+  // Try to parse the month and year to fallback to createdAt range
+  const parts = monthLabel.split(' ');
+  let startDate: Date | null = null;
+  let endDate: Date | null = null;
+
+  if (parts.length === 2) {
+    const monthIndex = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ].indexOf(parts[0]);
+    const year = parseInt(parts[1], 10);
+    if (monthIndex !== -1 && !isNaN(year)) {
+      startDate = new Date(year, monthIndex, 1);
+      endDate = new Date(year, monthIndex + 1, 1);
+    }
+  }
+
+  // 1. Query by exact month label
+  const q1 = query(collection(db, 'fees'), where('month', '==', monthLabel));
+  const snap1 = await getDocs(q1);
+
+  // 2. Query by createdAt range (to catch custom/older fees that lack the month field)
+  let snap2 = { docs: [] as any[] };
+  if (startDate && endDate) {
+    const q2 = query(
+      collection(db, 'fees'),
+      where('createdAt', '>=', startDate),
+      where('createdAt', '<', endDate)
+    );
+    snap2 = await getDocs(q2);
+  }
+
+  // Merge and deduplicate
+  const map = new Map<string, any>();
+  snap1.docs.forEach(d => map.set(d.id, d));
+  
+  // For snap2 (createdAt fallback), only include if the record doesn't belong to a DIFFERENT month
+  snap2.docs.forEach(d => {
+    const data = d.data();
+    if (!data.month || data.month === monthLabel) {
+      map.set(d.id, d);
+    }
+  });
+
+  const results = Array.from(map.values()).map((d) => ({
     id: d.id,
     ...d.data(),
+    status: parseFeeStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
   })) as Fee[];
+
   return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
-export async function getAvailableFeeMonths(): Promise<string[]> {
-  // Fetch all fees and extract unique months (client-side distinct)
-  const snap = await getDocs(collection(db, 'fees'));
-  const months = new Set<string>();
-  snap.docs.forEach((d) => {
-    const m = d.data().month;
-    if (m) months.add(m);
-  });
-  // Sort months chronologically
-  return Array.from(months).sort((a, b) => {
-    const dateA = new Date(a);
-    const dateB = new Date(b);
-    return dateB.getTime() - dateA.getTime();
-  });
-}
+
 
 export async function getFeesByStudent(studentId: string): Promise<Fee[]> {
   const q = query(
@@ -374,6 +433,8 @@ export async function getFeesByStudent(studentId: string): Promise<Fee[]> {
   const items = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
+    status: parseFeeStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
   })) as Fee[];
@@ -456,10 +517,65 @@ export async function getInvoices(): Promise<Invoice[]> {
   return snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
+    status: parseInvoiceStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
     paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
   })) as Invoice[];
+}
+
+export async function getInvoicesByMonth(monthLabel: string): Promise<Invoice[]> {
+  const parts = monthLabel.split(' ');
+  let startDate: Date | null = null;
+  let endDate: Date | null = null;
+
+  if (parts.length === 2) {
+    const monthIndex = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ].indexOf(parts[0]);
+    const year = parseInt(parts[1], 10);
+    if (monthIndex !== -1 && !isNaN(year)) {
+      startDate = new Date(year, monthIndex, 1);
+      endDate = new Date(year, monthIndex + 1, 1);
+    }
+  }
+
+  const q1 = query(collection(db, 'invoices'), where('month', '==', monthLabel));
+  const snap1 = await getDocs(q1);
+
+  let snap2 = { docs: [] as any[] };
+  if (startDate && endDate) {
+    const q2 = query(
+      collection(db, 'invoices'),
+      where('createdAt', '>=', startDate),
+      where('createdAt', '<', endDate)
+    );
+    snap2 = await getDocs(q2);
+  }
+
+  const map = new Map<string, any>();
+  snap1.docs.forEach(d => map.set(d.id, d));
+  
+  snap2.docs.forEach(d => {
+    const data = d.data();
+    if (!data.month || data.month === monthLabel) {
+      map.set(d.id, d);
+    }
+  });
+
+  const results = Array.from(map.values()).map((d) => ({
+    id: d.id,
+    ...d.data(),
+    status: parseInvoiceStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
+    createdAt: toDate(d.data().createdAt),
+    updatedAt: toDate(d.data().updatedAt),
+    paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
+  })) as Invoice[];
+
+  return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]> {
@@ -471,6 +587,8 @@ export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]
   const items = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
+    status: parseInvoiceStatus(d.data()),
+    paidAmount: d.data().paidAmount || 0,
     createdAt: toDate(d.data().createdAt),
     updatedAt: toDate(d.data().updatedAt),
     paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
@@ -483,7 +601,7 @@ export async function createInvoice(
   creatorId: string,
 ): Promise<Invoice> {
   const newId = 'inv-' + Math.random().toString(36).substring(2, 9);
-  const number = generateInvoiceNumber();
+  const number = await getNextInvoiceNumber();
   const now = new Date();
   const newInv: Invoice = {
     ...invoiceData,
@@ -503,6 +621,8 @@ export async function createInvoice(
 
   return newInv;
 }
+
+import { addSale } from '@/features/inventory/inventorySaleService';
 
 export async function payInvoice(
   invoiceId: string,
@@ -528,6 +648,35 @@ export async function payInvoice(
     ...(isFullyPaid ? { paidAt: serverTimestamp() } : {}),
     updatedAt: serverTimestamp(),
   });
+
+  // If fully paid, create inventory sales for any linked inventory items
+  if (isFullyPaid) {
+    for (const item of inv.items) {
+      if (item.inventoryItemId && item.inventoryItemType) {
+        try {
+          await addSale(
+            {
+              itemId: item.inventoryItemId,
+              itemType: item.inventoryItemType,
+              itemName: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              totalAmount: item.total,
+              month: inv.month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+              saleDate: now.toISOString().split('T')[0],
+              soldTo: inv.studentName,
+              invoiceId: inv.id,
+              status: 'completed',
+              notes: `Auto-generated from Invoice #${inv.invoiceNumber}`,
+            },
+            paymentData.collectorId
+          );
+        } catch (err) {
+          console.warn('payInvoice: Failed to record inventory sale:', err);
+        }
+      }
+    }
+  }
 
   // Update linked fee records
   if (inv.feeIds && inv.feeIds.length > 0) {

@@ -8,10 +8,12 @@ import {
   Activity,
   FileCheck,
   Award,
+  History,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { StatCard } from '@/components/common/StatCard';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { LoginHistoryModal } from './LoginHistoryModal';
 
 import { formatCurrency, formatNumber } from '@/lib/utils';
 import { fetchDashboardData, type DashboardData } from './dashboardService';
@@ -39,6 +41,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const loadData = () => {
     setIsLoading(true);
@@ -79,7 +82,15 @@ export default function DashboardPage() {
       <PageHeader
         title="Dashboard Overview"
         description="Monitor school activities, finances, and active records in real time."
+        action={
+          hasRole(['admin', 'manager']) ? {
+            label: 'Login History',
+            icon: <History className="h-4 w-4" />,
+            onClick: () => setIsHistoryOpen(true),
+          } : undefined
+        }
       />
+      {isHistoryOpen && <LoginHistoryModal onClose={() => setIsHistoryOpen(false)} />}
 
       {/* KPI Stats Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

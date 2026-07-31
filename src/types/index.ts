@@ -212,6 +212,7 @@ export interface Fee {
   notes?: string;
   invoiceId?: string;
   month?: string; // e.g. "July 2026"
+  alertSentAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -242,6 +243,8 @@ export interface InvoiceItem {
   quantity: number;
   unitPrice: number;
   total: number;
+  inventoryItemId?: string;
+  inventoryItemType?: 'stationery' | 'uniforms' | 'books';
 }
 
 export interface Invoice {
@@ -265,6 +268,7 @@ export interface Invoice {
   month?: string;
   category?: string;  // 'school' | 'academy' — inherited from student
   feeIds?: string[];
+  alertSentAt?: Date;
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;
@@ -365,6 +369,8 @@ export interface InventorySale {
   saleDate: string;        // YYYY-MM-DD
   soldTo?: string;         // student name / customer
   notes?: string;
+  invoiceId?: string;      // if bought through fee challan
+  status?: 'pending_payment' | 'completed'; // for tracking if tied to unpaid invoice
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;

@@ -19,21 +19,21 @@ const SCHOOL_ADDRESS = 'Gondlanwala Road Galla Shazia Hospital Wala';
 const SCHOOL_PHONE   = '+92-346-0204447';
 
 const FEE_ROWS_BANK = [
-  { key: 'Monthly Fee',       searchKey: 'MONTHLY'      },
-  { key: 'Admission Fee',     searchKey: 'ADMISSION'    },
-  { key: 'Registration Fee',  searchKey: 'REGISTRATION' },
-  { key: 'Art Material',      searchKey: 'ART'          },
-  { key: 'Transport Fee',     searchKey: 'TRANSPORT'    },
-  { key: 'Books',             searchKey: 'BOOK'         },
-  { key: 'Uniform',           searchKey: 'UNIFORM'      },
-  { key: 'Fine / Late Fee',   searchKey: 'FINE'         },
-  { key: 'Others',            searchKey: 'OTHER'        },
-  { key: 'Previous Balance',  searchKey: 'PREVIOUS'     },
+  { key: 'Monthly Fee',       searchKeys: ['MONTHLY']      },
+  { key: 'Admission Fee',     searchKeys: ['ADMISSION']    },
+  { key: 'Registration Fee',  searchKeys: ['REGISTRATION'] },
+  { key: 'Art Material',      searchKeys: ['ART']          },
+  { key: 'Transport Fee',     searchKeys: ['TRANSPORT']    },
+  { key: 'Books / Stationery',searchKeys: ['BOOK', 'STATIONERY'] },
+  { key: 'Uniform',           searchKeys: ['UNIFORM']      },
+  { key: 'Fine / Late Fee',   searchKeys: ['FINE']         },
+  { key: 'Others',            searchKeys: ['OTHER']        },
+  { key: 'Previous Balance',  searchKeys: ['PREVIOUS']     },
 ];
 
-function getRowAmount(items: Invoice['items'], searchKey: string): number {
-  const match = items.find((i) => i.description.toUpperCase().includes(searchKey));
-  return match ? match.total : 0;
+function getRowAmount(items: Invoice['items'], searchKeys: string[]): number {
+  const matches = items.filter((i) => searchKeys.some(key => i.description.toUpperCase().includes(key)));
+  return matches.reduce((sum, item) => sum + item.total, 0);
 }
 
 // Three copies — distinct labels + accent colours
@@ -234,7 +234,7 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
               </thead>
               <tbody>
                 {FEE_ROWS_BANK.map((row, idx) => {
-                  const amt = getRowAmount(invoice.items, row.searchKey);
+                  const amt = getRowAmount(invoice.items, row.searchKeys);
                   return (
                     <tr key={row.key} style={{ background: idx % 2 === 0 ? '#fff' : '#f8faff' }}>
                       <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>{idx + 1}</td>

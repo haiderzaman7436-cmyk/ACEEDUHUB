@@ -60,6 +60,7 @@ export default function SettingsPage() {
     }
   };
 
+
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
@@ -136,7 +137,7 @@ export default function SettingsPage() {
                         onClick={handleClearSeed} 
                         disabled={isSeeding || isClearing}
                         variant="outline"
-                        className="gap-2 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                        className="gap-2 text-amber-600 hover:text-amber-700 hover:bg-amber-50 border-amber-200"
                       >
                         {isClearing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         {isClearing ? 'Removing...' : 'Clear Demo Data'}

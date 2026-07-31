@@ -74,7 +74,7 @@ export async function createGradeRegistration(
   return newReg;
 }
 
-import { generateInvoiceNumber } from '@/lib/utils';
+import { getNextInvoiceNumber } from '@/lib/counterService';
 import type { Invoice } from '@/types';
 
 async function generateAdmissionInvoice(reg: GradeRegistration): Promise<void> {
@@ -87,7 +87,7 @@ async function generateAdmissionInvoice(reg: GradeRegistration): Promise<void> {
 
   const invoice: Invoice = {
     id: invId,
-    invoiceNumber: generateInvoiceNumber(),
+    invoiceNumber: await getNextInvoiceNumber(),
     studentId: reg.studentId,
     studentName: reg.studentName,
     className: reg.className || `Grade ${reg.gradeLevel}`,

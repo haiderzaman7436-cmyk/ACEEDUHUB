@@ -38,8 +38,10 @@ export async function fetchDashboardData(): Promise<DashboardData> {
     const activeTeachers = teachersSnap.data().count;
     const boardRegs = gradeRegsSnap.data().count;
 
-    // Calculate real monthly revenue by summing all paid fee amounts
-    const feesSnap = await getDocs(feesColl);
+    // Calculate real revenue by summing fees created this year (to avoid full database scan)
+    const startOfYear = new Date(new Date().getFullYear(), 0, 1);
+    const feesQuery = query(feesColl, where('createdAt', '>=', startOfYear));
+    const feesSnap = await getDocs(feesQuery);
     let totalRevenue = 0;
     const revenueMap: Record<string, number> = {
       'Tuition': 0,
@@ -78,7 +80,9 @@ export async function fetchDashboardData(): Promise<DashboardData> {
       enrollmentCounts[m] = 0;
     });
 
-    const studentDocs = await getDocs(studentsColl);
+    const currentYear = new Date().getFullYear();
+    const studentQuery = query(studentsColl, where('admissionDate', '>=', `${currentYear}-01-01`));
+    const studentDocs = await getDocs(studentQuery);
     studentDocs.forEach((doc) => {
       const data = doc.data();
       const admDateStr = data.admissionDate; // YYYY-MM-DD

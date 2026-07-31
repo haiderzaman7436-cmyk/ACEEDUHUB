@@ -16,7 +16,7 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import type { AppUser, UserRole } from '@/types';
 
@@ -112,7 +112,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      const uid = credential.user.uid;
+      
+      // Fetch user doc to record accurate history
+      const userDoc = await getDoc(doc(db, 'users', uid));
+      let displayName = credential.user.displayName || 'User';
+      let role = 'user';
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        displayName = data.displayName || displayName;
+        role = data.role || role;
+      }
+      
+      try {
+        await addDoc(collection(db, 'loginHistory'), {
+          uid,
+          email,
+          displayName,
+          role,
+          timestamp: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Failed to record login history', err);
+      }
+
     } catch (error: any) {
       // Auto-provision manager@school.com and admin@school.com if they don't exist in auth yet
       const isManager = email.toLowerCase() === 'manager@school.com' && password === 'Manager@aceeduhub';
@@ -132,6 +156,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             createdAt: serverTimestamp(),
             lastLoginAt: serverTimestamp(),
           });
+          
+          try {
+            await addDoc(collection(db, 'loginHistory'), {
+              uid,
+              email,
+              displayName,
+              role,
+              timestamp: serverTimestamp(),
+            });
+          } catch (err) {
+            console.warn('Failed to record login history', err);
+          }
+          
           setIsLoading(false);
           return;
         } catch (createErr) {
