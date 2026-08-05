@@ -56,16 +56,13 @@ export function LoginPage() {
   const handleResetPassword = async () => {
     setError('');
     setResetMessage('');
-    if (!email) {
-      setError('Please enter your email address first to reset your password.');
-      return;
-    }
     setIsResetting(true);
     try {
-      await resetPassword(email);
-      setResetMessage('A password reset link has been sent to your email.');
+      const adminEmail = 'haider.zaman7436@gmail.com';
+      await resetPassword(adminEmail);
+      setResetMessage(`A password reset link has been sent to the admin email (${adminEmail}).`);
     } catch (err: any) {
-      setError('Failed to send reset email. Ensure the email is correct.');
+      setError('Failed to send reset email. Ensure the admin account exists.');
     } finally {
       setIsResetting(false);
     }
