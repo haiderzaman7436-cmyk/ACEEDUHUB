@@ -95,5 +95,20 @@ service cloud.firestore {
     match /promotionLogs/{docId} {
       allow read, write: if isAuth();
     }
+
+    // ── Counters ──────────────────────────────────────────────────────────────
+    match /counters/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Login History ─────────────────────────────────────────────────────────
+    match /loginHistory/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Report Cards ──────────────────────────────────────────────────────────
+    match /reportCards/{docId} {
+      allow read, write: if isAuth();
+    }
   }
 }

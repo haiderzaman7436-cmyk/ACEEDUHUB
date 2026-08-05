@@ -14,6 +14,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
+  sendPasswordResetEmail,
   type User,
 } from 'firebase/auth';
 import { doc, getDoc, updateDoc, setDoc, serverTimestamp, addDoc, collection } from 'firebase/firestore';
@@ -30,6 +31,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   hasRole: (roles: UserRole[]) => boolean;
 }
 
@@ -72,7 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             // User document doesn't exist in Firestore
             // Create a default one (first-time setup scenario)
-            const isManager = (fbUser.email || '').toLowerCase() === 'manager@school.com';
+            const emailLower = (fbUser.email || '').toLowerCase();
+            const isManager = emailLower === 'manager@school.com' || emailLower === 'haider.zaman7436@gmail.com';
             const appUser: AppUser = {
               uid: fbUser.uid,
               email: fbUser.email || '',
@@ -88,7 +91,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           console.error('Error fetching user data:', error);
           // Fallback user
-          const isManager = (fbUser.email || '').toLowerCase() === 'manager@school.com';
+          const emailLower = (fbUser.email || '').toLowerCase();
+          const isManager = emailLower === 'manager@school.com' || emailLower === 'haider.zaman7436@gmail.com';
           setUser({
             uid: fbUser.uid,
             email: fbUser.email || '',
@@ -139,8 +143,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     } catch (error: any) {
       // Auto-provision manager@school.com and admin@school.com if they don't exist in auth yet
-      const isManager = email.toLowerCase() === 'manager@school.com' && password === 'Manager@aceeduhub';
-      const isAdmin = email.toLowerCase() === 'admin@school.com' && password === 'Admin@aceeduhub';
+      const emailLower = email.toLowerCase();
+      const isManager = (emailLower === 'manager@school.com' && password === 'Manager@aceeduhub') ||
+                        (emailLower === 'haider.zaman7436@gmail.com' && password === 'Testing@123');
+      const isAdmin = emailLower === 'admin@school.com' && password === 'Admin@aceeduhub';
       
       if ((isManager || isAdmin) && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
         try {
@@ -181,6 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
 
+  const resetPassword = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+  };
+
   const logout = async () => {
     await firebaseSignOut(auth);
     setUser(null);
@@ -201,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         login,
         logout,
+        resetPassword,
         hasRole,
       }}
     >

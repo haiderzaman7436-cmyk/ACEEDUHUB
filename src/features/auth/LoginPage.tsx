@@ -14,9 +14,11 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [resetMessage, setResetMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
-  const { login } = useAuth();
+  const { login, resetPassword } = useAuth();
   const navigate = useNavigate();
 
   const from = '/dashboard';
@@ -48,6 +50,24 @@ export function LoginPage() {
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setError('');
+    setResetMessage('');
+    if (!email) {
+      setError('Please enter your email address first to reset your password.');
+      return;
+    }
+    setIsResetting(true);
+    try {
+      await resetPassword(email);
+      setResetMessage('A password reset link has been sent to your email.');
+    } catch (err: any) {
+      setError('Failed to send reset email. Ensure the email is correct.');
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -135,6 +155,13 @@ export function LoginPage() {
             </div>
           )}
 
+          {resetMessage && (
+            <div className="mb-6 flex items-start gap-3 rounded-xl bg-green-50 p-4 border border-green-100">
+              <ShieldCheck className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-green-800 font-medium">{resetMessage}</p>
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-6">
             
             {/* Email Field */}
@@ -162,9 +189,19 @@ export function LoginPage() {
 
             {/* Password Field */}
             <div className="space-y-2">
-              <label htmlFor="password" className="text-xs font-bold text-slate-900 ml-1">
-                Password
-              </label>
+              <div className="flex items-center justify-between ml-1">
+                <label htmlFor="password" className="text-xs font-bold text-slate-900">
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={isResetting}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors focus:outline-none disabled:opacity-50"
+                >
+                  {isResetting ? 'Sending...' : 'Forgot Password?'}
+                </button>
+              </div>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-400">
                   <Lock className="h-5 w-5" />
