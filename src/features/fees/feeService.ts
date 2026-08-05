@@ -668,6 +668,7 @@ export async function payInvoice(
               invoiceId: inv.id,
               status: 'completed',
               notes: `Auto-generated from Invoice #${inv.invoiceNumber}`,
+              createdBy: paymentData.collectorId,
             },
             paymentData.collectorId
           );
