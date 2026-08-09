@@ -473,7 +473,11 @@ export async function recordPayment(
 
   const existing = { id: feeSnap.id, ...feeSnap.data() } as Fee;
 
-  const newPaidAmount = (existing.paidAmount || 0) + paymentData.amount;
+  const currentBalance = existing.amount - (existing.paidAmount || 0);
+  const amountToApplyToCurrent = Math.min(paymentData.amount, currentBalance);
+  let excessAmount = paymentData.amount - amountToApplyToCurrent;
+
+  const newPaidAmount = (existing.paidAmount || 0) + amountToApplyToCurrent;
   const isFullyPaid = newPaidAmount >= existing.amount;
 
   const updated: Partial<Fee> = {
@@ -503,6 +507,58 @@ export async function recordPayment(
       });
     } catch (err) {
       console.warn('recordPayment linked invoice Firestore error:', err);
+    }
+  }
+
+  // Handle excess payment by applying to older fees
+  if (excessAmount > 0) {
+    try {
+      const q = query(collection(db, 'fees'), where('studentId', '==', existing.studentId));
+      const studentFeesSnap = await getDocs(q);
+      
+      const olderFees = studentFeesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Fee))
+        .filter(f => {
+          if (f.id === existing.id) return false;
+          const status = parseFeeStatus(f);
+          return status !== 'paid' && new Date(f.createdAt).getTime() < new Date(existing.createdAt).getTime();
+        })
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      for (const olderFee of olderFees) {
+        if (excessAmount <= 0) break;
+        
+        const olderBalance = olderFee.amount - (olderFee.paidAmount || 0);
+        if (olderBalance > 0) {
+          const applyToOlder = Math.min(excessAmount, olderBalance);
+          excessAmount -= applyToOlder;
+          
+          const newOlderPaid = (olderFee.paidAmount || 0) + applyToOlder;
+          const isOlderFullyPaid = newOlderPaid >= olderFee.amount;
+          
+          await updateDoc(doc(db, 'fees', olderFee.id), {
+            paidAmount: newOlderPaid,
+            status: isOlderFullyPaid ? 'paid' : 'partial',
+            paidDate: now.toISOString().split('T')[0],
+            paymentMethod: paymentData.method,
+            receiptNumber: receipt,
+            collectedBy: paymentData.collectorId,
+            collectedByName: paymentData.collectorName,
+            updatedAt: serverTimestamp(),
+          });
+          
+          if (olderFee.invoiceId) {
+            await updateDoc(doc(db, 'invoices', olderFee.invoiceId), {
+              paidAmount: newOlderPaid,
+              status: isOlderFullyPaid ? 'paid' : 'sent',
+              ...(isOlderFullyPaid ? { paidAt: serverTimestamp() } : {}),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error applying excess amount to older fees', e);
     }
   }
 
@@ -596,6 +652,29 @@ export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]
   return items.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
 }
 
+export async function getStudentArrears(studentId: string, beforeDate: Date): Promise<number> {
+  const q = query(
+    collection(db, 'invoices'),
+    where('studentId', '==', studentId),
+    where('createdAt', '<', beforeDate)
+  );
+  const snap = await getDocs(q);
+  let totalArrears = 0;
+  
+  snap.docs.forEach(d => {
+    const data = d.data();
+    const status = parseInvoiceStatus(data);
+    if (status !== 'paid' && status !== 'cancelled') {
+      const remaining = (data.grandTotal || 0) - (data.paidAmount || 0);
+      if (remaining > 0) {
+        totalArrears += remaining;
+      }
+    }
+  });
+  
+  return totalArrears;
+}
+
 export async function createInvoice(
   invoiceData: Omit<Invoice, 'id' | 'invoiceNumber' | 'createdAt' | 'updatedAt'>,
   creatorId: string,
@@ -639,7 +718,11 @@ export async function payInvoice(
   if (!snap.exists()) throw new Error('Invoice not found.');
   const inv = { id: snap.id, ...snap.data() } as Invoice;
 
-  const newPaid = (inv.paidAmount || 0) + paymentData.amount;
+  const currentBalance = inv.grandTotal - (inv.paidAmount || 0);
+  const amountToApplyToCurrent = Math.min(paymentData.amount, currentBalance);
+  let excessAmount = paymentData.amount - amountToApplyToCurrent;
+
+  const newPaid = (inv.paidAmount || 0) + amountToApplyToCurrent;
   const isFullyPaid = newPaid >= inv.grandTotal;
 
   await updateDoc(doc(db, 'invoices', invoiceId), {
@@ -697,6 +780,61 @@ export async function payInvoice(
       } catch (err) {
         console.warn('payInvoice linked fee update Firestore error:', err);
       }
+    }
+  }
+
+  // Handle excess payment by applying to older invoices
+  if (excessAmount > 0) {
+    try {
+      const q = query(collection(db, 'invoices'), where('studentId', '==', inv.studentId));
+      const studentInvoicesSnap = await getDocs(q);
+      
+      const olderInvoices = studentInvoicesSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Invoice))
+        .filter(i => {
+          if (i.id === inv.id) return false;
+          const status = parseInvoiceStatus(i);
+          return (status !== 'paid' && status !== 'cancelled') && new Date(i.createdAt).getTime() < new Date(inv.createdAt).getTime();
+        })
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      for (const olderInv of olderInvoices) {
+        if (excessAmount <= 0) break;
+        
+        const olderBalance = (olderInv.grandTotal || 0) - (olderInv.paidAmount || 0);
+        if (olderBalance > 0) {
+          const applyToOlder = Math.min(excessAmount, olderBalance);
+          excessAmount -= applyToOlder;
+          
+          const newOlderPaid = (olderInv.paidAmount || 0) + applyToOlder;
+          const isOlderFullyPaid = newOlderPaid >= olderInv.grandTotal;
+          
+          await updateDoc(doc(db, 'invoices', olderInv.id), {
+            paidAmount: newOlderPaid,
+            status: isOlderFullyPaid ? 'paid' : 'sent',
+            ...(isOlderFullyPaid ? { paidAt: serverTimestamp() } : {}),
+            updatedAt: serverTimestamp(),
+          });
+          
+          if (olderInv.feeIds && olderInv.feeIds.length > 0) {
+            for (const olderFeeId of olderInv.feeIds) {
+              const receipt = generateReceiptNumber();
+              await updateDoc(doc(db, 'fees', olderFeeId), {
+                paidAmount: newOlderPaid,
+                status: isOlderFullyPaid ? 'paid' : 'partial',
+                paidDate: now.toISOString().split('T')[0],
+                paymentMethod: paymentData.method,
+                receiptNumber: receipt,
+                collectedBy: paymentData.collectorId,
+                collectedByName: paymentData.collectorName,
+                updatedAt: serverTimestamp(),
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error applying excess amount to older invoices', e);
     }
   }
 

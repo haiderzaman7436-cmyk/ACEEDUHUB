@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
+  getStudentArrears,
 } from '@/features/fees/feeService';
 import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
@@ -38,13 +39,15 @@ function getCurrentMonthLabel(): string {
 function getStatusBadge(status: string) {
   switch (status) {
     case 'paid':
-      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 text-xs font-semibold">Paid</Badge>;
+      return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 font-semibold text-xs">✓ Paid</Badge>;
+    case 'partial':
+      return <Badge className="bg-blue-100 text-blue-700 border-blue-200 font-semibold text-xs">◑ Partial</Badge>;
     case 'overdue':
-      return <Badge className="bg-red-100 text-red-700 border-red-200 text-xs font-semibold">Overdue</Badge>;
+      return <Badge className="bg-red-100 text-red-700 border-red-200 font-semibold text-xs">⚠ Overdue</Badge>;
     case 'cancelled':
-      return <Badge className="bg-slate-100 text-slate-600 border-slate-200 text-xs font-semibold">Cancelled</Badge>;
+      return <Badge className="bg-slate-100 text-slate-600 border-slate-200 font-semibold text-xs">✕ Cancelled</Badge>;
     default:
-      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs font-semibold">Unpaid</Badge>;
+      return <Badge className="bg-amber-100 text-amber-700 border-amber-200 font-semibold text-xs">⏳ Pending</Badge>;
   }
 }
 
@@ -58,6 +61,7 @@ export default function InvoicesPage() {
   // Challan print states
   const [challanInvoice, setChallanInvoice] = useState<Invoice | null>(null);
   const [challanStudent, setChallanStudent] = useState<Student | null>(null);
+  const [challanArrears, setChallanArrears] = useState(0);
   const [isLoadingChallan, setIsLoadingChallan] = useState(false);
   const [isBulkAlertOpen, setIsBulkAlertOpen] = useState(false);
   const [inventoryModalInvoice, setInventoryModalInvoice] = useState<Invoice | null>(null);
@@ -66,6 +70,7 @@ export default function InvoicesPage() {
   const [isPayOpen, setIsPayOpen] = useState(false);
   const [payInvTarget, setPayInvTarget] = useState<Invoice | null>(null);
   const [payAmount, setPayAmount] = useState(0);
+  const [payArrears, setPayArrears] = useState(0);
   const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -202,8 +207,10 @@ export default function InvoicesPage() {
     try {
       const student = await getStudentById(inv.studentId);
       if (!student) { toast.error('Student data not found.'); return; }
+      const arrears = await getStudentArrears(inv.studentId, new Date(inv.createdAt));
       setChallanInvoice(inv);
       setChallanStudent(student);
+      setChallanArrears(arrears);
     } catch {
       toast.error('Failed to load challan data.');
     } finally {
@@ -211,10 +218,18 @@ export default function InvoicesPage() {
     }
   };
 
-  const handlePayClick = (inv: Invoice) => {
+  const handlePayClick = async (inv: Invoice) => {
     setPayInvTarget(inv);
     setPayAmount(inv.grandTotal - (inv.paidAmount || 0));
     setIsPayOpen(true);
+    
+    // Fetch arrears async to update UI if they exist
+    try {
+      const arrears = await getStudentArrears(inv.studentId, new Date(inv.createdAt));
+      setPayArrears(arrears);
+    } catch (e) {
+      console.warn('Failed to load arrears for payment modal', e);
+    }
   };
 
   const handlePaySubmit = async (e: React.FormEvent) => {
@@ -390,7 +405,7 @@ export default function InvoicesPage() {
               Pay
             </Button>
           )}
-          {item.status === 'overdue' && !item.alertSentAt && (
+          {(item.status === 'overdue' || item.status === 'draft' || item.status === 'sent' || item.status === 'partial') && !item.alertSentAt && (
             <Button
               size="sm"
               onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
@@ -398,10 +413,10 @@ export default function InvoicesPage() {
               title="Send WhatsApp Alert"
             >
               <MessageCircle className="h-3.5 w-3.5" />
-              Alert
+              Send
             </Button>
           )}
-          {item.status === 'overdue' && item.alertSentAt && (
+          {(item.status === 'overdue' || item.status === 'draft' || item.status === 'sent' || item.status === 'partial') && item.alertSentAt && (
             <Button
               size="sm"
               variant="outline"
@@ -431,7 +446,8 @@ export default function InvoicesPage() {
         <BankInvoicePrint
           invoice={challanInvoice}
           student={challanStudent}
-          onClose={() => { setChallanInvoice(null); setChallanStudent(null); }}
+          arrears={challanArrears}
+          onClose={() => { setChallanInvoice(null); setChallanStudent(null); setChallanArrears(0); }}
         />
       )}
 
@@ -508,7 +524,19 @@ export default function InvoicesPage() {
                   <span className="font-semibold text-slate-700">Balance Due:</span>
                   <span className="font-bold text-red-600">{formatCurrency(payInvTarget.grandTotal - (payInvTarget.paidAmount || 0))}</span>
                 </div>
+                {payArrears > 0 && (
+                  <div className="flex justify-between text-red-600 font-semibold border-t border-blue-100 pt-1 mt-1">
+                    <span>Previous Arrears:</span>
+                    <span>{formatCurrency(payArrears)}</span>
+                  </div>
+                )}
               </div>
+
+              {payArrears > 0 && (
+                <div className="bg-amber-50 text-amber-800 text-xs p-3 rounded-lg border border-amber-200">
+                  <strong>Note:</strong> This student has <strong>{formatCurrency(payArrears)}</strong> in unpaid previous arrears. If the parent pays the full amount including arrears, enter the total amount received below. The system will automatically allocate the extra amount to clear the oldest invoices.
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700">Payment Amount (PKR)</label>
@@ -516,7 +544,7 @@ export default function InvoicesPage() {
                   type="number"
                   value={payAmount}
                   onChange={(e) => setPayAmount(Number(e.target.value))}
-                  max={payInvTarget.grandTotal - (payInvTarget.paidAmount || 0)}
+                  max={(payInvTarget.grandTotal - (payInvTarget.paidAmount || 0)) + payArrears}
                   required
                   className="border-slate-200"
                 />

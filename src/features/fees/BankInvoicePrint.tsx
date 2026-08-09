@@ -12,6 +12,7 @@ import logoImg from '@/assets/logo.webp';
 interface BankInvoicePrintProps {
   invoice: Invoice;
   student: Student;
+  arrears?: number;
   onClose: () => void;
 }
 
@@ -43,10 +44,10 @@ const COPIES: { label: string; accent: string; badgeBg: string; badgeText: strin
   { label: 'Office Copy',   accent: '#7c3aed', badgeBg: '#ede9fe', badgeText: '#4c1d95' },
 ];
 
-export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrintProps) {
+export function BankInvoicePrint({ invoice, student, arrears = 0, onClose }: BankInvoicePrintProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const guardian  = student.guardians?.[0];
-  const total     = invoice.grandTotal;
+  const total     = invoice.grandTotal + arrears;
   const paid      = invoice.paidAmount || 0;
   const balance   = Math.max(0, total - paid);
   const discount  = invoice.discount || 0;
@@ -234,7 +235,12 @@ export function BankInvoicePrint({ invoice, student, onClose }: BankInvoicePrint
               </thead>
               <tbody>
                 {FEE_ROWS_BANK.map((row, idx) => {
-                  const amt = getRowAmount(invoice.items, row.searchKeys);
+                  let amt = getRowAmount(invoice.items, row.searchKeys);
+                  // If it's the Previous Balance row, inject the dynamically calculated arrears
+                  if (row.key === 'Previous Balance') {
+                    amt += arrears;
+                  }
+                  
                   return (
                     <tr key={row.key} style={{ background: idx % 2 === 0 ? '#fff' : '#f8faff' }}>
                       <td style={{ padding:'2px 4px', border:'1px solid #e2e8f0', fontSize:'8px' }}>{idx + 1}</td>

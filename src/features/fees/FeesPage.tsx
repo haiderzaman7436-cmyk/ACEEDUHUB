@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getFees, getFeesByMonth,
-  recordPayment, getFeesByStudent,
+  recordPayment, getFeesByStudent, getStudentArrears,
 } from './feeService';
 import { sendWhatsAppAlert } from './whatsappService';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
@@ -57,6 +57,7 @@ export default function FeesPage() {
   const [isPayOpen, setIsPayOpen] = useState(false);
   const [selectedFee, setSelectedFee] = useState<Fee | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [payArrears, setPayArrears] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBulkAlertOpen, setIsBulkAlertOpen] = useState(false);
@@ -82,10 +83,17 @@ export default function FeesPage() {
 
   useEffect(() => { loadFees(); }, [loadFees]);
 
-  const handlePayClick = (fee: Fee) => {
+  const handlePayClick = async (fee: Fee) => {
     setSelectedFee(fee);
     setPaymentAmount(fee.amount - fee.paidAmount);
     setIsPayOpen(true);
+    
+    try {
+      const arrears = await getStudentArrears(fee.studentId, new Date(fee.createdAt));
+      setPayArrears(arrears);
+    } catch (e) {
+      console.warn('Failed to fetch arrears for fees payment modal', e);
+    }
   };
 
   const handlePaySubmit = async (e: React.FormEvent) => {
@@ -235,7 +243,7 @@ export default function FeesPage() {
               Pay Fee
             </Button>
           )}
-          {item.status === 'overdue' && !item.alertSentAt && (
+          {(item.status === 'overdue' || item.status === 'pending' || item.status === 'partial') && !item.alertSentAt && (
             <Button
               size="sm"
               onClick={() => sendWhatsAppAlert(item, 'Fee').then(loadFees)}
@@ -243,10 +251,10 @@ export default function FeesPage() {
               title="Send WhatsApp Alert"
             >
               <MessageCircle className="h-3.5 w-3.5" />
-              Alert
+              Send
             </Button>
           )}
-          {item.status === 'overdue' && item.alertSentAt && (
+          {(item.status === 'overdue' || item.status === 'pending' || item.status === 'partial') && item.alertSentAt && (
             <Button
               size="sm"
               variant="outline"
@@ -536,7 +544,19 @@ export default function FeesPage() {
                   <span className="text-slate-600 font-semibold">Remaining Balance:</span>
                   <span className="font-bold text-red-600">{formatCurrency(selectedFee.amount - selectedFee.paidAmount)}</span>
                 </div>
+                {payArrears > 0 && (
+                  <div className="flex justify-between text-red-600 font-semibold border-t border-blue-100 pt-1 mt-1">
+                    <span>Previous Arrears:</span>
+                    <span>{formatCurrency(payArrears)}</span>
+                  </div>
+                )}
               </div>
+
+              {payArrears > 0 && (
+                <div className="bg-amber-50 text-amber-800 text-xs p-3 rounded-lg border border-amber-200">
+                  <strong>Note:</strong> This student has <strong>{formatCurrency(payArrears)}</strong> in unpaid previous arrears. If the parent pays the full amount including arrears, enter the total amount received below. The system will automatically allocate the extra amount to clear the oldest fees.
+                </div>
+              )}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700">Payment Amount (PKR)</label>
@@ -544,7 +564,7 @@ export default function FeesPage() {
                   type="number"
                   value={paymentAmount}
                   onChange={(e) => setPaymentAmount(Number(e.target.value))}
-                  max={selectedFee.amount - selectedFee.paidAmount}
+                  max={(selectedFee.amount - selectedFee.paidAmount) + payArrears}
                   required
                   className="border-slate-200"
                 />
