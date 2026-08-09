@@ -62,6 +62,11 @@ export function LoginPage() {
       setError('Please enter your email address first.');
       return;
     }
+
+    if (targetEmail.toLowerCase() !== 'aceeducationalhub786@gmail.com') {
+      setError('Password reset is only allowed for the primary administrator account.');
+      return;
+    }
     
     setIsResetting(true);
     try {
