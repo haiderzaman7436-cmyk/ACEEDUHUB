@@ -145,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Auto-provision manager@school.com and admin@school.com if they don't exist in auth yet
       const emailLower = email.toLowerCase();
       const isManager = (emailLower === 'manager@school.com' && password === 'Manager@aceeduhub') ||
-                        (emailLower === 'aceeducationalhub786@gmail.com' && password === 'Testing@123');
+                        (emailLower === 'aceeducationalhub786@gmail.com' && password === 'ACE963');
       const isAdmin = emailLower === 'admin@school.com' && password === 'Admin@aceeduhub';
       
       if ((isManager || isAdmin) && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
