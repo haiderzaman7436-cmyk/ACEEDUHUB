@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // User document doesn't exist in Firestore
             // Create a default one (first-time setup scenario)
             const emailLower = (fbUser.email || '').toLowerCase();
-            const isManager = emailLower === 'manager@school.com' || emailLower === 'aceeducationalhub786@gmail.com';
+            const isManager = emailLower === 'manager@school.com';
             const appUser: AppUser = {
               uid: fbUser.uid,
               email: fbUser.email || '',
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('Error fetching user data:', error);
           // Fallback user
           const emailLower = (fbUser.email || '').toLowerCase();
-          const isManager = emailLower === 'manager@school.com' || emailLower === 'aceeducationalhub786@gmail.com';
+          const isManager = emailLower === 'manager@school.com';
           setUser({
             uid: fbUser.uid,
             email: fbUser.email || '',
@@ -144,9 +144,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       // Auto-provision manager@school.com and admin@school.com if they don't exist in auth yet
       const emailLower = email.toLowerCase();
-      const isManager = (emailLower === 'manager@school.com' && password === 'Manager@aceeduhub') ||
-                        (emailLower === 'aceeducationalhub786@gmail.com' && password === 'ACE963');
-      const isAdmin = emailLower === 'admin@school.com' && password === 'Admin@aceeduhub';
+      const isManager = emailLower === 'manager@school.com' && password === 'Manager@aceeduhub';
+      const isAdmin = (emailLower === 'admin@school.com' && password === 'Admin@aceeduhub') ||
+                      (emailLower === 'aceeducationalhub786@gmail.com' && password === 'ACE963');
       
       if ((isManager || isAdmin) && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
         try {
