@@ -76,6 +76,9 @@ export default function FeesPage() {
     try {
       const data = showAllMonths ? await getFees() : await getFeesByMonth(selectedMonth);
       setFees(data);
+    } catch (error) {
+      console.error('Failed to load fees:', error);
+      toast.error('Failed to load fees for the selected month.');
     } finally {
       setIsLoading(false);
     }
@@ -303,7 +306,7 @@ export default function FeesPage() {
       {/* Month Selector Bar */}
       <Card className="border border-blue-100 shadow-sm bg-gradient-to-r from-blue-50 to-indigo-50">
         <CardContent className="p-4">
-          <div className="flex flex-wrap gap-3 items-center justify-between">
+          <div className="flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center shrink-0">
                 <CalendarDays className="h-5 w-5 text-white" />
@@ -378,7 +381,7 @@ export default function FeesPage() {
 
       {/* Monthly Analysis Summary */}
       {hasRole(['admin', 'manager']) && (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
           <CardContent className="p-4">
             <div className="flex items-center gap-3">

@@ -117,16 +117,16 @@ export async function generateMonthlyFeesForAll(): Promise<{ success: number; sk
   const monthLabel = getMonthLabel();
   const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
   const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-  
+
   if (students.length === 0) return { success: 0, skipped: 0 };
-  
+
   let successCount = 0;
   let skipCount = 0;
 
   for (const student of students) {
     // Check if this student already has a fee for this month (avoid duplicates)
     const existingFeesQ = query(
-      collection(db, 'fees'), 
+      collection(db, 'fees'),
       where('studentId', '==', student.id),
       where('month', '==', monthLabel)
     );
@@ -266,17 +266,17 @@ async function createCustomInvoice(student: Student, fee: Fee): Promise<void> {
     paidAmount: 0,
     status: 'sent',
     dueDate: fee.dueDate,
+    month: fee.month,
     category: student.category || 'school',
     feeIds: [fee.id],
-    notes: `Due by ${
-      fee.dueDate
+    notes: `Due by ${fee.dueDate
         ? new Date(fee.dueDate).toLocaleDateString('en-PK', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        })
         : 'the due date'
-    }.`,
+      }.`,
     createdAt: now,
     updatedAt: now,
     createdBy: 'system',
@@ -285,7 +285,7 @@ async function createCustomInvoice(student: Student, fee: Fee): Promise<void> {
   // Link invoice id back to fee
   try {
     await updateDoc(doc(db, 'fees', fee.id), { invoiceId: invId });
-  } catch {}
+  } catch { }
 
   // Persist invoice to Firestore
   try {
@@ -337,7 +337,7 @@ async function createAutoInvoice(student: Student, fee: Fee): Promise<void> {
 
   try {
     await updateDoc(doc(db, 'fees', fee.id), { invoiceId: invId });
-  } catch {}
+  } catch { }
 
   try {
     await setDoc(doc(db, 'invoices', invId), {
@@ -401,7 +401,7 @@ export async function getFeesByMonth(monthLabel: string): Promise<Fee[]> {
   // Merge and deduplicate
   const map = new Map<string, any>();
   snap1.docs.forEach(d => map.set(d.id, d));
-  
+
   // For snap2 (createdAt fallback), only include if the record doesn't belong to a DIFFERENT month
   snap2.docs.forEach(d => {
     const data = d.data();
@@ -515,7 +515,7 @@ export async function recordPayment(
     try {
       const q = query(collection(db, 'fees'), where('studentId', '==', existing.studentId));
       const studentFeesSnap = await getDocs(q);
-      
+
       const olderFees = studentFeesSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Fee))
         .filter(f => {
@@ -527,15 +527,15 @@ export async function recordPayment(
 
       for (const olderFee of olderFees) {
         if (excessAmount <= 0) break;
-        
+
         const olderBalance = olderFee.amount - (olderFee.paidAmount || 0);
         if (olderBalance > 0) {
           const applyToOlder = Math.min(excessAmount, olderBalance);
           excessAmount -= applyToOlder;
-          
+
           const newOlderPaid = (olderFee.paidAmount || 0) + applyToOlder;
           const isOlderFullyPaid = newOlderPaid >= olderFee.amount;
-          
+
           await updateDoc(doc(db, 'fees', olderFee.id), {
             paidAmount: newOlderPaid,
             status: isOlderFullyPaid ? 'paid' : 'partial',
@@ -546,7 +546,7 @@ export async function recordPayment(
             collectedByName: paymentData.collectorName,
             updatedAt: serverTimestamp(),
           });
-          
+
           if (olderFee.invoiceId) {
             await updateDoc(doc(db, 'invoices', olderFee.invoiceId), {
               paidAmount: newOlderPaid,
@@ -613,7 +613,7 @@ export async function getInvoicesByMonth(monthLabel: string): Promise<Invoice[]>
 
   const map = new Map<string, any>();
   snap1.docs.forEach(d => map.set(d.id, d));
-  
+
   snap2.docs.forEach(d => {
     const data = d.data();
     if (!data.month || data.month === monthLabel) {
@@ -655,23 +655,25 @@ export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]
 export async function getStudentArrears(studentId: string, beforeDate: Date): Promise<number> {
   const q = query(
     collection(db, 'invoices'),
-    where('studentId', '==', studentId),
-    where('createdAt', '<', beforeDate)
+    where('studentId', '==', studentId)
   );
   const snap = await getDocs(q);
   let totalArrears = 0;
-  
+
   snap.docs.forEach(d => {
     const data = d.data();
-    const status = parseInvoiceStatus(data);
-    if (status !== 'paid' && status !== 'cancelled') {
-      const remaining = (data.grandTotal || 0) - (data.paidAmount || 0);
-      if (remaining > 0) {
-        totalArrears += remaining;
+    const createdAt = toDate(data.createdAt);
+    if (createdAt < beforeDate) {
+      const status = parseInvoiceStatus(data);
+      if (status !== 'paid' && status !== 'cancelled') {
+        const remaining = (data.grandTotal || 0) - (data.paidAmount || 0);
+        if (remaining > 0) {
+          totalArrears += remaining;
+        }
       }
     }
   });
-  
+
   return totalArrears;
 }
 
@@ -788,7 +790,7 @@ export async function payInvoice(
     try {
       const q = query(collection(db, 'invoices'), where('studentId', '==', inv.studentId));
       const studentInvoicesSnap = await getDocs(q);
-      
+
       const olderInvoices = studentInvoicesSnap.docs
         .map(d => ({ id: d.id, ...d.data() } as Invoice))
         .filter(i => {
@@ -800,22 +802,22 @@ export async function payInvoice(
 
       for (const olderInv of olderInvoices) {
         if (excessAmount <= 0) break;
-        
+
         const olderBalance = (olderInv.grandTotal || 0) - (olderInv.paidAmount || 0);
         if (olderBalance > 0) {
           const applyToOlder = Math.min(excessAmount, olderBalance);
           excessAmount -= applyToOlder;
-          
+
           const newOlderPaid = (olderInv.paidAmount || 0) + applyToOlder;
           const isOlderFullyPaid = newOlderPaid >= olderInv.grandTotal;
-          
+
           await updateDoc(doc(db, 'invoices', olderInv.id), {
             paidAmount: newOlderPaid,
             status: isOlderFullyPaid ? 'paid' : 'sent',
             ...(isOlderFullyPaid ? { paidAt: serverTimestamp() } : {}),
             updatedAt: serverTimestamp(),
           });
-          
+
           if (olderInv.feeIds && olderInv.feeIds.length > 0) {
             for (const olderFeeId of olderInv.feeIds) {
               const receipt = generateReceiptNumber();

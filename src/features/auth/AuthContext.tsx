@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser(appUser);
 
             // Update last login
-            await updateDoc(doc(db, 'users', fbUser.uid), {
+            updateDoc(doc(db, 'users', fbUser.uid), {
               lastLoginAt: serverTimestamp(),
             }).catch(() => {
               // Silently fail — non-critical
@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // User document doesn't exist in Firestore
             // Create a default one (first-time setup scenario)
             const emailLower = (fbUser.email || '').toLowerCase();
-            const isManager = emailLower === 'manager@school.com';
+            const isManager = emailLower === import.meta.env.VITE_MANAGER_EMAIL?.toLowerCase();
             const appUser: AppUser = {
               uid: fbUser.uid,
               email: fbUser.email || '',
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('Error fetching user data:', error);
           // Fallback user
           const emailLower = (fbUser.email || '').toLowerCase();
-          const isManager = emailLower === 'manager@school.com';
+          const isManager = emailLower === import.meta.env.VITE_MANAGER_EMAIL?.toLowerCase();
           setUser({
             uid: fbUser.uid,
             email: fbUser.email || '',
@@ -130,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       try {
-        await addDoc(collection(db, 'loginHistory'), {
+        addDoc(collection(db, 'loginHistory'), {
           uid,
           email,
           displayName,
@@ -142,11 +142,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
     } catch (error: any) {
-      // Auto-provision manager@school.com and admin@school.com if they don't exist in auth yet
+      // Auto-provision manager and admin if they don't exist in auth yet
       const emailLower = email.toLowerCase();
-      const isManager = emailLower === 'manager@school.com' && password === 'Manager@aceeduhub';
-      const isAdmin = (emailLower === 'admin@school.com' && password === 'Admin@aceeduhub') ||
-                      (emailLower === 'aceeducationalhub786@gmail.com' && password === 'ACE963');
+      const isManager = emailLower === import.meta.env.VITE_MANAGER_EMAIL?.toLowerCase() && password === import.meta.env.VITE_MANAGER_PASSWORD;
+      const isAdmin = (emailLower === import.meta.env.VITE_ADMIN_EMAIL?.toLowerCase() && password === import.meta.env.VITE_ADMIN_PASSWORD) ||
+                      (emailLower === import.meta.env.VITE_ALT_ADMIN_EMAIL?.toLowerCase() && password === import.meta.env.VITE_ALT_ADMIN_PASSWORD);
       
       if ((isManager || isAdmin) && (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential')) {
         try {
@@ -164,7 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           
           try {
-            await addDoc(collection(db, 'loginHistory'), {
+            addDoc(collection(db, 'loginHistory'), {
               uid,
               email,
               displayName,

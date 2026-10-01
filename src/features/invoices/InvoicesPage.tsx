@@ -62,7 +62,7 @@ export default function InvoicesPage() {
   const [challanInvoice, setChallanInvoice] = useState<Invoice | null>(null);
   const [challanStudent, setChallanStudent] = useState<Student | null>(null);
   const [challanArrears, setChallanArrears] = useState(0);
-  const [isLoadingChallan, setIsLoadingChallan] = useState(false);
+  const [loadingChallanId, setLoadingChallanId] = useState<string | null>(null);
   const [isBulkAlertOpen, setIsBulkAlertOpen] = useState(false);
   const [inventoryModalInvoice, setInventoryModalInvoice] = useState<Invoice | null>(null);
 
@@ -80,7 +80,7 @@ export default function InvoicesPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [showAllMonths, setShowAllMonths] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonthLabel());
-  
+
   // Split month filter for UI
   const [monthPart, yearPart] = selectedMonth.split(' ');
 
@@ -89,6 +89,10 @@ export default function InvoicesPage() {
     const fetchPromise = showAllMonths ? getInvoices() : getInvoicesByMonth(selectedMonth);
     fetchPromise
       .then((data) => setInvoices(data))
+      .catch((error) => {
+        console.error('Failed to load invoices:', error);
+        toast.error('Failed to load invoices for the selected month.');
+      })
       .finally(() => setIsLoading(false));
   }, [showAllMonths, selectedMonth]);
 
@@ -203,7 +207,7 @@ export default function InvoicesPage() {
   };
 
   const handleChallanClick = async (inv: Invoice) => {
-    setIsLoadingChallan(true);
+    setLoadingChallanId(inv.id);
     try {
       const student = await getStudentById(inv.studentId);
       if (!student) { toast.error('Student data not found.'); return; }
@@ -211,10 +215,11 @@ export default function InvoicesPage() {
       setChallanInvoice(inv);
       setChallanStudent(student);
       setChallanArrears(arrears);
-    } catch {
+    } catch (error) {
+      console.error('Failed to load challan data:', error);
       toast.error('Failed to load challan data.');
     } finally {
-      setIsLoadingChallan(false);
+      setLoadingChallanId(null);
     }
   };
 
@@ -222,7 +227,7 @@ export default function InvoicesPage() {
     setPayInvTarget(inv);
     setPayAmount(inv.grandTotal - (inv.paidAmount || 0));
     setIsPayOpen(true);
-    
+
     // Fetch arrears async to update UI if they exist
     try {
       const arrears = await getStudentArrears(inv.studentId, new Date(inv.createdAt));
@@ -388,9 +393,9 @@ export default function InvoicesPage() {
             className="h-8 gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-600 hover:text-white font-semibold"
             onClick={() => handleChallanClick(item)}
             title="Print Fee Challan (Student / Accounts / Office)"
-            disabled={isLoadingChallan}
+            disabled={loadingChallanId !== null}
           >
-            {isLoadingChallan ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Banknote className="h-3.5 w-3.5" />}
+            {loadingChallanId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Banknote className="h-3.5 w-3.5" />}
             Challan
           </Button>
 
@@ -478,10 +483,10 @@ export default function InvoicesPage() {
       />
 
       {isBulkAlertOpen && (
-        <BulkWhatsAppModal 
-          records={filteredInvoices} 
-          type="Invoice" 
-          onClose={() => setIsBulkAlertOpen(false)} 
+        <BulkWhatsAppModal
+          records={filteredInvoices}
+          type="Invoice"
+          onClose={() => setIsBulkAlertOpen(false)}
           onAlertSent={loadInvoices}
         />
       )}
@@ -593,8 +598,8 @@ export default function InvoicesPage() {
                 </div>
                 <div className="flex items-center gap-3 flex-wrap justify-end">
                   {selectedInvoice.status !== 'paid' && selectedInvoice.status !== 'cancelled' && (
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       onClick={() => {
                         setIsPreviewOpen(false);
                         setInventoryModalInvoice(selectedInvoice);
@@ -629,104 +634,106 @@ export default function InvoicesPage() {
 
               {/* Scrollable invoice body */}
               <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-white text-slate-800">
-              {/* Header */}
-              <div className="flex justify-between items-start">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <div className="h-14 w-14 rounded-full overflow-hidden border-2 border-blue-200 shadow-md shrink-0">
-                      <img src={logoImg} alt="ACE Logo" className="h-full w-full object-cover" />
+                {/* Header */}
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="h-14 w-14 rounded-full overflow-hidden border-2 border-blue-200 shadow-md shrink-0">
+                        <img src={logoImg} alt="ACE Logo" className="h-full w-full object-cover" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-black text-blue-700 tracking-tight">{APP_NAME}</h2>
+                        <p className="text-[11px] text-slate-500 font-medium">The School of Science &amp; Arts</p>
+                      </div>
                     </div>
-                    <div>
-                      <h2 className="text-xl font-black text-blue-700 tracking-tight">{APP_NAME}</h2>
-                      <p className="text-[11px] text-slate-500 font-medium">The School of Science &amp; Arts</p>
+                    <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                      Gondlanwala road, Galla DR Shazia wala<br />
+                      Phone: 03001234567 | info@ace.edu.pk | Category: <span className="font-bold uppercase text-blue-600">{selectedInvoice.category || 'school'}</span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="inline-block bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider mb-2">OFFICIAL INVOICE</div>
+                    <p className="text-sm font-extrabold text-blue-700">{selectedInvoice.invoiceNumber}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Status: <span className="font-bold uppercase text-emerald-600">{selectedInvoice.status}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <hr className="border-slate-200" />
+
+                {/* Bill to */}
+                <div className="grid grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <h4 className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-1">Bill To</h4>
+                    <p className="font-bold text-base text-slate-900">{selectedInvoice.studentName}</p>
+                    <p className="text-slate-600 mt-0.5">Class: <span className="font-semibold">{selectedInvoice.className}</span> — Sec {selectedInvoice.section}</p>
+                    {selectedInvoice.month && <p className="text-slate-600">Billing Period: {selectedInvoice.month}</p>}
+                  </div>
+                  <div className="text-right">
+                    <h4 className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-1">Invoice Details</h4>
+                    <p className="text-slate-600">Issued: <span className="font-semibold">{new Date(selectedInvoice.createdAt).toLocaleDateString()}</span></p>
+                    <p className="text-slate-600 mt-0.5">Due: <span className="font-semibold text-red-600">{formatDate(selectedInvoice.dueDate)}</span></p>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="w-full overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200">
+                          <th className="px-4 py-3 font-bold text-slate-500 uppercase text-[9px] tracking-wider">Fee Description</th>
+                          <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase text-[9px] tracking-wider">Qty</th>
+                          <th className="px-4 py-3 text-right font-bold text-slate-500 uppercase text-[9px] tracking-wider">Unit Price</th>
+                          <th className="px-4 py-3 text-right font-bold text-slate-500 uppercase text-[9px] tracking-wider">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {selectedInvoice.items.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3 font-semibold text-slate-700">{item.description}</td>
+                            <td className="px-4 py-3 text-center text-slate-600">{item.quantity}</td>
+                            <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(item.unitPrice)}</td>
+                            <td className="px-4 py-3 text-right font-bold text-slate-900">{formatCurrency(item.total)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Totals */}
+                <div className="flex justify-end">
+                  <div className="w-64 space-y-2 text-xs border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+                    <div className="flex justify-between text-slate-600 font-medium">
+                      <span>Subtotal</span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(selectedInvoice.subtotal)}</span>
                     </div>
-                  </div>
-                  <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                    Gondlanwala road, Galla DR Shazia wala<br />
-                    Phone: 03001234567 | info@ace.edu.pk | Category: <span className="font-bold uppercase text-blue-600">{selectedInvoice.category || 'school'}</span>
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div className="inline-block bg-blue-600 text-white px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider mb-2">OFFICIAL INVOICE</div>
-                  <p className="text-sm font-extrabold text-blue-700">{selectedInvoice.invoiceNumber}</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Status: <span className="font-bold uppercase text-emerald-600">{selectedInvoice.status}</span>
-                  </p>
-                </div>
-              </div>
-
-              <hr className="border-slate-200" />
-
-              {/* Bill to */}
-              <div className="grid grid-cols-2 gap-4 text-xs">
-                <div>
-                  <h4 className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-1">Bill To</h4>
-                  <p className="font-bold text-base text-slate-900">{selectedInvoice.studentName}</p>
-                  <p className="text-slate-600 mt-0.5">Class: <span className="font-semibold">{selectedInvoice.className}</span> — Sec {selectedInvoice.section}</p>
-                  {selectedInvoice.month && <p className="text-slate-600">Billing Period: {selectedInvoice.month}</p>}
-                </div>
-                <div className="text-right">
-                  <h4 className="font-bold text-slate-400 uppercase text-[10px] tracking-wider mb-1">Invoice Details</h4>
-                  <p className="text-slate-600">Issued: <span className="font-semibold">{new Date(selectedInvoice.createdAt).toLocaleDateString()}</span></p>
-                  <p className="text-slate-600 mt-0.5">Due: <span className="font-semibold text-red-600">{formatDate(selectedInvoice.dueDate)}</span></p>
-                </div>
-              </div>
-
-              {/* Items Table */}
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-xs text-left">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="px-4 py-3 font-bold text-slate-500 uppercase text-[9px] tracking-wider">Fee Description</th>
-                      <th className="px-4 py-3 text-center font-bold text-slate-500 uppercase text-[9px] tracking-wider">Qty</th>
-                      <th className="px-4 py-3 text-right font-bold text-slate-500 uppercase text-[9px] tracking-wider">Unit Price</th>
-                      <th className="px-4 py-3 text-right font-bold text-slate-500 uppercase text-[9px] tracking-wider">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {selectedInvoice.items.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-3 font-semibold text-slate-700">{item.description}</td>
-                        <td className="px-4 py-3 text-center text-slate-600">{item.quantity}</td>
-                        <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(item.unitPrice)}</td>
-                        <td className="px-4 py-3 text-right font-bold text-slate-900">{formatCurrency(item.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Totals */}
-              <div className="flex justify-end">
-                <div className="w-64 space-y-2 text-xs border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-                  <div className="flex justify-between text-slate-600 font-medium">
-                    <span>Subtotal</span>
-                    <span className="font-semibold text-slate-800">{formatCurrency(selectedInvoice.subtotal)}</span>
-                  </div>
-                  {selectedInvoice.discount > 0 && (
+                    {selectedInvoice.discount > 0 && (
+                      <div className="flex justify-between text-emerald-600 font-medium">
+                        <span>Discount</span>
+                        <span>− {formatCurrency(selectedInvoice.discount)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-emerald-600 font-medium">
-                      <span>Discount</span>
-                      <span>− {formatCurrency(selectedInvoice.discount)}</span>
+                      <span>Amount Paid</span>
+                      <span className="font-semibold">− {formatCurrency(selectedInvoice.paidAmount || 0)}</span>
                     </div>
-                  )}
-                  <div className="flex justify-between text-emerald-600 font-medium">
-                    <span>Amount Paid</span>
-                    <span className="font-semibold">− {formatCurrency(selectedInvoice.paidAmount || 0)}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-200 pt-2 font-bold text-sm text-slate-950">
-                    <span>Balance Due</span>
-                    <span className="text-blue-700">{formatCurrency(selectedInvoice.grandTotal - (selectedInvoice.paidAmount || 0))}</span>
+                    <div className="flex justify-between border-t border-slate-200 pt-2 font-bold text-sm text-slate-950">
+                      <span>Balance Due</span>
+                      <span className="text-blue-700">{formatCurrency(selectedInvoice.grandTotal - (selectedInvoice.paidAmount || 0))}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Footer note */}
-              <div className="text-center text-[9px] text-slate-400 border-t border-dashed border-slate-200 pt-4">
-                <p className="font-semibold text-slate-500">★ {APP_NAME.toUpperCase()} — DIGITAL RECORD SYSTEM ★</p>
-                <p>Computer-generated invoice. Use the print buttons above to print.</p>
-              </div>
+                {/* Footer note */}
+                <div className="text-center text-[9px] text-slate-400 border-t border-dashed border-slate-200 pt-4">
+                  <p className="font-semibold text-slate-500">★ {APP_NAME.toUpperCase()} — DIGITAL RECORD SYSTEM ★</p>
+                  <p>Computer-generated invoice. Use the print buttons above to print.</p>
+                </div>
 
-            </div>{/* end scrollable body */}
+              </div>{/* end scrollable body */}
             </div>{/* end modal card */}
           </div>{/* end fixed wrapper */}
         </>
@@ -735,7 +742,7 @@ export default function InvoicesPage() {
       {/* Filter / Summary Toolbar */}
       <Card className="border border-slate-200 shadow-sm">
         <CardContent className="p-4">
-          <div className="flex flex-wrap gap-4 items-center justify-between">
+          <div className="flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
             {/* Left: title + month indicator */}
             <div className="flex items-center gap-3">
               <Receipt className="h-5 w-5 text-blue-600 shrink-0" />
@@ -750,7 +757,7 @@ export default function InvoicesPage() {
 
             {/* Summary numbers */}
             {hasRole(['admin', 'manager']) && (
-              <div className="hidden md:flex gap-6 text-xs">
+              <div className="flex flex-wrap gap-4 sm:gap-6 text-xs">
                 <div className="text-center">
                   <div className="font-bold text-slate-800">{formatCurrency(totalBill)}</div>
                   <div className="text-slate-400">Total Billed</div>
@@ -812,9 +819,8 @@ export default function InvoicesPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowAllMonths(!showAllMonths)}
-                className={`h-10 gap-1.5 text-xs font-semibold rounded-xl ${
-                  showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700'
-                }`}
+                className={`h-10 gap-1.5 text-xs font-semibold rounded-xl ${showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700'
+                  }`}
               >
                 {showAllMonths ? '✓ Showing All' : 'Show All Time'}
               </Button>
