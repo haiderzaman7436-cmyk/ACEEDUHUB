@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter, Navigate, useRouteError } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { AppShell } from '@/components/layout/AppShell';
 import { ProtectedRoute } from '@/features/auth/ProtectedRoute';
@@ -36,11 +36,40 @@ const Loader = () => (
   </div>
 );
 
+// Error boundary to gracefully handle Vite chunk loading errors
+const RootErrorBoundary = () => {
+  const error = useRouteError() as any;
+
+  // Auto-reload the page if a dynamically imported module fails to load (usually means a new deployment happened)
+  if (error?.message?.includes('Failed to fetch dynamically imported module')) {
+    window.location.reload();
+    return <Loader />;
+  }
+
+  return (
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-[hsl(var(--background))] p-4">
+      <div className="max-w-md rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-8 text-center shadow-lg">
+        <h1 className="mb-4 text-2xl font-bold text-[hsl(var(--foreground))]">Oops! Something went wrong.</h1>
+        <p className="mb-6 text-sm text-[hsl(var(--muted-foreground))]">
+          {error?.message || 'An unexpected application error occurred.'}
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+        >
+          Refresh Page
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const router = createBrowserRouter([
   // Public Login Route
   {
     path: '/login',
     element: <LoginPage />,
+    errorElement: <RootErrorBoundary />,
   },
   
   // Unauthorized Route
@@ -57,6 +86,7 @@ export const router = createBrowserRouter([
         <AppShell />
       </ProtectedRoute>
     ),
+    errorElement: <RootErrorBoundary />,
     children: [
       {
         index: true,
