@@ -25,6 +25,45 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   data_operator: 'Data Operator',
 };
 
+// ── Class Definitions ────────────────────────────────────────────────────────
+
+export const SCHOOL_CLASSES = [
+  { id: 'playgroup', label: 'Play Group' },
+  { id: 'nursery', label: 'Nursery' },
+  { id: 'prep', label: 'Prep' },
+  { id: 'c1', label: 'Grade 1' },
+  { id: 'c2', label: 'Grade 2' },
+  { id: 'c3', label: 'Grade 3' },
+  { id: 'c4', label: 'Grade 4' },
+  { id: 'c5', label: 'Grade 5' },
+  { id: 'c6', label: 'Grade 6' },
+  { id: 'c7', label: 'Grade 7' },
+  { id: 'c8', label: 'Grade 8' },
+  { id: 'c9', label: 'Grade 9' },
+  { id: 'c10', label: 'Grade 10' },
+] as const;
+
+export const ACADEMY_CLASSES = [
+  { id: 'nursery', label: 'Nursery' },
+  { id: 'prep', label: 'Prep' },
+  { id: 'c1', label: 'Grade 1' },
+  { id: 'c2', label: 'Grade 2' },
+  { id: 'c3', label: 'Grade 3' },
+  { id: 'c4', label: 'Grade 4' },
+  { id: 'c5', label: 'Grade 5' },
+  { id: 'c6', label: 'Grade 6' },
+  { id: 'c7', label: 'Grade 7' },
+  { id: 'c8', label: 'Grade 8' },
+  { id: 'c9', label: 'Grade 9' },
+  { id: 'c10', label: 'Grade 10' },
+] as const;
+
+export const CLASS_OPTIONS = [...SCHOOL_CLASSES, ...ACADEMY_CLASSES];
+
+export const CLASS_MAP: Record<string, string> = Object.fromEntries(
+  CLASS_OPTIONS.map((c) => [c.id, c.label])
+);
+
 // ── Navigation Configuration ────────────────────────────────────────────────
 
 export interface NavItem {
@@ -62,12 +101,7 @@ export const NAV_ITEMS: NavItem[] = [
     roles: ['admin', 'manager', 'data_operator'],
   },
 
-  {
-    title: 'Fees',
-    href: '/fees',
-    icon: 'DollarSign',
-    roles: ['admin', 'manager', 'data_operator'],
-  },
+
   {
     title: 'Invoices',
     href: '/invoices',

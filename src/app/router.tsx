@@ -11,7 +11,7 @@ const StudentsPage = lazy(() => import('@/features/students/StudentsPage'));
 const AcademyStudentsPage = lazy(() => import('@/features/academy/AcademyStudentsPage'));
 const TeachersPage = lazy(() => import('@/features/teachers/TeachersPage'));
 
-const FeesPage = lazy(() => import('@/features/fees/FeesPage'));
+
 const InvoicesPage = lazy(() => import('@/features/invoices/InvoicesPage'));
 
 const InventoryDashboardPage = lazy(() => import('@/features/inventory/InventoryDashboardPage'));
@@ -127,15 +127,6 @@ export const router = createBrowserRouter([
         ),
       },
 
-      // Fees
-      {
-        path: 'fees',
-        element: (
-          <Suspense fallback={<Loader />}>
-            <FeesPage />
-          </Suspense>
-        ),
-      },
       // Invoices
       {
         path: 'invoices',

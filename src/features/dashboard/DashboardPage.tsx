@@ -346,11 +346,11 @@ export default function DashboardPage() {
               <span className="text-xs font-bold text-slate-700">Board Reg.</span>
             </button>
             <button
-              onClick={() => navigate('/fees')}
+              onClick={() => navigate('/invoices')}
               className="flex flex-col items-center justify-center p-4 border border-slate-200 rounded-xl bg-white hover:bg-slate-50 hover:scale-102 transition-all duration-200 group text-center cursor-pointer"
             >
               <DollarSign className="h-6 w-6 text-emerald-600 mb-2" />
-              <span className="text-xs font-bold text-slate-700">Collect Fees</span>
+              <span className="text-xs font-bold text-slate-700">Invoices</span>
             </button>
           </CardContent>
         </Card>

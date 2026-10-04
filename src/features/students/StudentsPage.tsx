@@ -10,6 +10,7 @@ import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { getStatusColor, formatDate } from '@/lib/utils';
 import { getStudents, deleteStudent, addStudent, updateStudent, promoteStudents } from './studentService';
 import { StudentForm } from './StudentForm';
+import { StudentProfileModal } from './StudentProfileModal';
 import type { StudentFormInput } from './studentValidation';
 import type { Student } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -20,6 +21,8 @@ export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [classFilter, setClassFilter] = useState('');
   
+  const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
+
   // Class Promotion state
   const [isPromoteOpen, setIsPromoteOpen] = useState(false);
   const [promoteFrom, setPromoteFrom] = useState('');
@@ -239,7 +242,7 @@ export default function StudentsPage() {
             size="icon"
             className="h-8.5 w-8.5 text-[hsl(var(--muted-foreground))] hover:text-indigo-600 rounded-lg"
             title="View Profile"
-            onClick={() => toast.info(`Profile View: ${item.firstName} ${item.lastName}`)}
+            onClick={() => setViewingStudent(item)}
           >
             <Eye className="h-4 w-4" />
           </Button>
@@ -461,6 +464,14 @@ export default function StudentsPage() {
             </div>
           </Card>
         </div>
+      )}
+      
+      {/* Student Profile View Modal */}
+      {viewingStudent && (
+        <StudentProfileModal
+          student={viewingStudent}
+          onClose={() => setViewingStudent(null)}
+        />
       )}
     </div>
   );

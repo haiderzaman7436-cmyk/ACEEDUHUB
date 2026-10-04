@@ -43,7 +43,7 @@ const ACADEMY_CLASSES = [
   { id: 'c7', label: 'Grade 7' },
   { id: 'c8', label: 'Grade 8' },
   { id: 'c9', label: 'Grade 9' },
-  { id: 'c10 ', label: 'Grade 10' },
+  { id: 'c10', label: 'Grade 10' },
 ] as const;
 
 const CLASS_OPTIONS = [...SCHOOL_CLASSES, ...ACADEMY_CLASSES];

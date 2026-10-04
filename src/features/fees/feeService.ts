@@ -4,12 +4,12 @@
 
 import {
   collection, doc, getDocs, getDoc, setDoc, updateDoc,
-  query, where, orderBy, Timestamp, serverTimestamp,
+  query, where, orderBy, Timestamp, serverTimestamp, writeBatch
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Fee, Invoice, FeeTemplate, Student } from '@/types';
 import { generateReceiptNumber } from '@/lib/utils';
-import { getNextInvoiceNumber } from '@/lib/counterService';
+import { getNextInvoiceNumber, reserveInvoiceNumbers } from '@/lib/counterService';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -113,40 +113,169 @@ export async function updateFeeTemplate(id: string, data: Partial<FeeTemplate>):
 
 // ── Bulk Monthly Fee Generation ─────────────────────────────────────────────
 
-export async function generateMonthlyFeesForAll(): Promise<{ success: number; skipped: number }> {
+export async function generateMonthlyFeesForAll(): Promise<{ success: number; skipped: number; missingTemplates: number }> {
   const monthLabel = getMonthLabel();
   const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
   const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
 
-  if (students.length === 0) return { success: 0, skipped: 0 };
+  if (students.length === 0) return { success: 0, skipped: 0, missingTemplates: 0 };
 
-  let successCount = 0;
+  // PRE-FETCH: Get ALL fees for the current month
+  const existingFeesSnap = await getDocs(query(collection(db, 'fees'), where('month', '==', monthLabel)));
+  const billedStudentIds = new Set<string>();
+  existingFeesSnap.docs.forEach(d => billedStudentIds.add(d.data().studentId));
+
+  // PRE-FETCH: Get ALL fee templates and map by className
+  const templatesSnap = await getDocs(collection(db, 'feeTemplates'));
+  const templatesByClass: Record<string, any[]> = {};
+  templatesSnap.docs.forEach(d => {
+    const data = d.data();
+    if (!templatesByClass[data.className]) templatesByClass[data.className] = [];
+    templatesByClass[data.className].push(data);
+  });
+
+  const pendingFees: any[] = [];
   let skipCount = 0;
+  let missingTemplatesCount = 0;
 
   for (const student of students) {
-    // Check if this student already has a fee for this month (avoid duplicates)
-    const existingFeesQ = query(
-      collection(db, 'fees'),
-      where('studentId', '==', student.id),
-      where('month', '==', monthLabel)
-    );
-    const existingSnap = await getDocs(existingFeesQ);
-    if (!existingSnap.empty) {
+    if (billedStudentIds.has(student.id)) {
       skipCount++;
       continue;
     }
 
-    // Try assigning default template fees
-    const templates = await getFeeTemplateForClass(student.className);
-    if (templates.length > 0) {
-      await assignFeesForNewStudent(student); // Re-uses the assignment logic
-      successCount++;
+    const classTemplates = templatesByClass[student.className] || [];
+    const studentTemplates = student.feeEntries || [];
+    
+    if (classTemplates.length > 0 || studentTemplates.length > 0) {
+      for (const template of classTemplates) {
+        pendingFees.push({ student, type: 'class', template });
+      }
+      for (const entry of studentTemplates) {
+        pendingFees.push({ student, type: 'student', entry });
+      }
     } else {
-      skipCount++;
+      missingTemplatesCount++;
     }
   }
 
-  return { success: successCount, skipped: skipCount };
+  if (pendingFees.length === 0) {
+    return { success: 0, skipped: skipCount, missingTemplates: missingTemplatesCount };
+  }
+
+  // Reserve all required invoice numbers in a single super-fast transaction
+  const reservedNumbers = await reserveInvoiceNumbers(pendingFees.length);
+  
+  let currentBatch = writeBatch(db);
+  let batchCount = 0;
+  
+  const commitBatchIfNeeded = async () => {
+    if (batchCount >= 490) { // Max 500 writes per batch
+      await currentBatch.commit();
+      currentBatch = writeBatch(db);
+      batchCount = 0;
+    }
+  };
+
+  const successfulStudentIds = new Set<string>();
+
+  for (let i = 0; i < pendingFees.length; i++) {
+    const item = pendingFees[i];
+    const { student } = item;
+    const invNumber = reservedNumbers[i];
+    const feeId = 'fee-' + Math.random().toString(36).substring(2, 9);
+    const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
+    let feeProps: any = {};
+    let dueDate: string;
+
+    if (item.type === 'class') {
+      const template = item.template;
+      dueDate = getMonthDueDate(template.dueDayOfMonth || 10);
+      feeProps = {
+        feeType: template.feeType,
+        description: `${template.description} — ${monthLabel}`,
+        amount: template.amount,
+      };
+    } else {
+      const entry = item.entry;
+      let day = 10;
+      if (entry.dueDate) {
+        const d = new Date(entry.dueDate);
+        if (!isNaN(d.getDate())) day = d.getDate();
+      }
+      dueDate = getMonthDueDate(day);
+      feeProps = {
+        feeType: 'other',
+        description: `${entry.description} — ${monthLabel}`,
+        amount: entry.amount,
+      };
+    }
+
+    const newFee: any = {
+      id: feeId,
+      studentId: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      className: student.className,
+      section: student.section,
+      ...feeProps,
+      dueDate,
+      paidAmount: 0,
+      status: 'pending',
+      month: monthLabel,
+      invoiceId: invId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    const newInvoice: any = {
+      id: invId,
+      invoiceNumber: invNumber,
+      studentId: student.id,
+      studentName: `${student.firstName} ${student.lastName}`,
+      className: student.className,
+      section: student.section,
+      items: [
+        {
+          id: 'item-1',
+          description: feeProps.description || 'Fee',
+          quantity: 1,
+          unitPrice: feeProps.amount,
+          total: feeProps.amount,
+        },
+      ],
+      subtotal: feeProps.amount,
+      discount: 0,
+      discountType: 'fixed',
+      tax: 0,
+      grandTotal: feeProps.amount,
+      paidAmount: 0,
+      status: 'sent',
+      dueDate,
+      month: monthLabel,
+      category: student.category || 'school',
+      feeIds: [feeId],
+      notes: `Due by ${dueDate ? new Date(dueDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the due date'}.`,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    currentBatch.set(doc(db, 'fees', feeId), newFee);
+    currentBatch.set(doc(db, 'invoices', invId), newInvoice);
+    batchCount += 2;
+    successfulStudentIds.add(student.id);
+
+    await commitBatchIfNeeded();
+  }
+
+  if (batchCount > 0) {
+    await currentBatch.commit();
+  }
+
+  return { 
+    success: successfulStudentIds.size, 
+    skipped: skipCount, 
+    missingTemplates: missingTemplatesCount 
+  };
 }
 
 // ── Auto-assign fees when a student is enrolled ──────────────────────────────
@@ -453,7 +582,104 @@ export async function addFee(feeData: Omit<Fee, 'id' | 'createdAt' | 'updatedAt'
     updatedAt: serverTimestamp(),
   });
 
+  // Automatically create invoice
+  const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
+  const invNumber = await getNextInvoiceNumber();
+
+  const invoice: Invoice = {
+    id: invId,
+    invoiceNumber: invNumber,
+    studentId: newFee.studentId,
+    studentName: newFee.studentName,
+    className: newFee.className,
+    section: newFee.section,
+    items: [{
+      id: 'item-1',
+      description: newFee.description || newFee.feeType,
+      quantity: 1,
+      unitPrice: newFee.amount,
+      total: newFee.amount,
+    }],
+    subtotal: newFee.amount,
+    discount: 0,
+    discountType: 'fixed',
+    tax: 0,
+    grandTotal: newFee.amount,
+    paidAmount: 0,
+    status: 'sent',
+    dueDate: newFee.dueDate,
+    month: newFee.month,
+    category: 'school', // default, updated below
+    feeIds: [newFee.id],
+    notes: 'Manually added fee.',
+    createdAt: now,
+    updatedAt: now,
+    createdBy: 'system',
+  };
+
+  try {
+    const studentSnap = await getDoc(doc(db, 'students', newFee.studentId));
+    if (studentSnap.exists()) {
+      const stud = studentSnap.data();
+      invoice.studentName = `${stud.firstName} ${stud.lastName}`;
+      invoice.category = stud.category || 'school';
+    }
+    
+    await setDoc(doc(db, 'invoices', invId), {
+      ...invoice,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    await updateDoc(doc(db, 'fees', newId), { invoiceId: invId });
+  } catch (err) {
+    console.warn('addFee auto-invoice generation error', err);
+  }
+
+  newFee.invoiceId = invId;
   return newFee;
+}
+
+export async function updateFee(id: string, updates: Partial<Fee>): Promise<void> {
+  await updateDoc(doc(db, 'fees', id), {
+    ...updates,
+    updatedAt: serverTimestamp(),
+  });
+
+  // If amount or description changes, update the linked invoice
+  const feeSnap = await getDoc(doc(db, 'fees', id));
+  if (feeSnap.exists() && feeSnap.data().invoiceId) {
+    const invId = feeSnap.data().invoiceId;
+    const invSnap = await getDoc(doc(db, 'invoices', invId));
+    if (invSnap.exists()) {
+      const invData = invSnap.data() as Invoice;
+      if (invData.items && invData.items.length === 1) {
+        invData.items[0].description = updates.description || invData.items[0].description;
+        invData.items[0].unitPrice = updates.amount || invData.items[0].unitPrice;
+        invData.items[0].total = updates.amount || invData.items[0].total;
+        
+        await updateDoc(doc(db, 'invoices', invId), {
+          items: invData.items,
+          subtotal: updates.amount || invData.subtotal,
+          grandTotal: updates.amount || invData.grandTotal,
+          dueDate: updates.dueDate || invData.dueDate,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  }
+}
+
+export async function deleteFee(id: string): Promise<void> {
+  const feeSnap = await getDoc(doc(db, 'fees', id));
+  if (feeSnap.exists() && feeSnap.data().invoiceId) {
+    try {
+      await deleteDoc(doc(db, 'invoices', feeSnap.data().invoiceId));
+    } catch(e) {
+      console.warn("Failed to delete linked invoice", e);
+    }
+  }
+  await deleteDoc(doc(db, 'fees', id));
 }
 
 export async function recordPayment(
@@ -501,7 +727,7 @@ export async function recordPayment(
     try {
       await updateDoc(doc(db, 'invoices', existing.invoiceId), {
         paidAmount: newPaidAmount,
-        status: isFullyPaid ? 'paid' : 'sent',
+        status: isFullyPaid ? 'paid' : 'partial',
         ...(isFullyPaid ? { paidAt: serverTimestamp() } : {}),
         updatedAt: serverTimestamp(),
       });
@@ -729,7 +955,7 @@ export async function payInvoice(
 
   await updateDoc(doc(db, 'invoices', invoiceId), {
     paidAmount: newPaid,
-    status: isFullyPaid ? 'paid' : 'sent',
+    status: isFullyPaid ? 'paid' : 'partial',
     ...(isFullyPaid ? { paidAt: serverTimestamp() } : {}),
     updatedAt: serverTimestamp(),
   });
@@ -865,4 +1091,239 @@ export async function saveGradeRegistrationFeeStructure(
     gradeLevel,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function syncMissingInvoices(): Promise<{ success: number; errors: number }> {
+  const feesSnap = await getDocs(collection(db, 'fees'));
+  let successCount = 0;
+  let errorCount = 0;
+
+  for (const feeDoc of feesSnap.docs) {
+    const fee = { id: feeDoc.id, ...feeDoc.data() } as any;
+    
+    let hasInvoice = false;
+    if (fee.invoiceId) {
+      try {
+        const invSnap = await getDoc(doc(db, 'invoices', fee.invoiceId));
+        if (invSnap.exists()) {
+          hasInvoice = true;
+          const invData = invSnap.data();
+          if (!invData.month && fee.month) {
+            await updateDoc(doc(db, 'invoices', fee.invoiceId), { month: fee.month });
+          }
+        }
+      } catch (e) {
+        console.warn('Error checking existing invoice for fee:', e);
+      }
+    } else {
+      try {
+        const q = query(collection(db, 'invoices'), where('feeIds', 'array-contains', fee.id));
+        const invSnap2 = await getDocs(q);
+        if (!invSnap2.empty) {
+          hasInvoice = true;
+          const invDoc = invSnap2.docs[0];
+          await updateDoc(doc(db, 'fees', fee.id), { invoiceId: invDoc.id });
+          const invData = invDoc.data();
+          if (!invData.month && fee.month) {
+            await updateDoc(doc(db, 'invoices', invDoc.id), { month: fee.month });
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!hasInvoice) {
+      try {
+        let category = 'school';
+        try {
+          const studentSnap = await getDoc(doc(db, 'students', fee.studentId));
+          if (studentSnap.exists()) {
+            category = studentSnap.data().category || 'school';
+          }
+        } catch (e) {}
+
+        const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
+        const invNumber = await getNextInvoiceNumber();
+        const now = new Date();
+
+        const invoice = {
+          id: invId,
+          invoiceNumber: invNumber,
+          studentId: fee.studentId,
+          studentName: fee.studentName || 'Unknown',
+          className: fee.className || 'Unknown',
+          section: fee.section || 'A',
+          items: [{
+            id: 'item-1',
+            description: fee.description || fee.feeType || 'Fee',
+            quantity: 1,
+            unitPrice: fee.amount,
+            total: fee.amount,
+          }],
+          subtotal: fee.amount,
+          discount: 0,
+          discountType: 'fixed',
+          tax: 0,
+          grandTotal: fee.amount,
+          paidAmount: fee.paidAmount || 0,
+          status: (fee.paidAmount || 0) >= fee.amount ? 'paid' : 'sent',
+          dueDate: fee.dueDate,
+          month: fee.month,
+          category: category,
+          feeIds: [fee.id],
+          notes: 'Auto-synced for missing invoice.',
+          createdAt: fee.createdAt || now,
+          updatedAt: now,
+          createdBy: 'system',
+        };
+
+        await updateDoc(doc(db, 'fees', fee.id), { invoiceId: invId });
+        await setDoc(doc(db, 'invoices', invId), {
+          ...invoice,
+          createdAt: fee.createdAt || serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        
+        successCount++;
+      } catch (e) {
+        console.error('Failed to sync missing invoice for fee', fee.id, e);
+        errorCount++;
+      }
+    }
+  }
+  
+  return { success: successCount, errors: errorCount };
+}
+
+export async function deleteInvoice(id: string): Promise<void> {
+  const invSnap = await getDoc(doc(db, 'invoices', id));
+  if (invSnap.exists()) {
+    const invData = invSnap.data() as Invoice;
+    // Delete linked fees if any
+    if (invData.feeIds && invData.feeIds.length > 0) {
+      for (const feeId of invData.feeIds) {
+        try {
+          await deleteDoc(doc(db, 'fees', feeId));
+        } catch(e) {
+          console.warn("Failed to delete linked fee", e);
+        }
+      }
+    }
+  }
+  await deleteDoc(doc(db, 'invoices', id));
+}
+
+export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; deletedInvoices: number }> {
+  // 1. Fetch all fees
+  const feesSnap = await getDocs(collection(db, 'fees'));
+  const allFees = feesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+  // 2. Group by studentId + month
+  const groupedFees: Record<string, any[]> = {};
+  for (const fee of allFees) {
+    // Treat empty month as 'October 2026' or just a generic empty month bucket so they get deduped against the real month!
+    const effectiveMonth = fee.month || 'unassigned';
+    
+    // Actually, we should group by studentId ONLY to find if a student has multiple fees generated in this short timeframe, 
+    // BUT we need to be careful not to delete fees from different months.
+    // However, since this system is brand new and all fees are just from October, 
+    // let's group entirely by studentId right now to nuke all duplicates across the board.
+    const key = fee.studentId; 
+    if (!groupedFees[key]) groupedFees[key] = [];
+    groupedFees[key].push(fee);
+  }
+
+  let deletedFees = 0;
+  let deletedInvoices = 0;
+  let syncedFees = 0;
+
+  for (const key in groupedFees) {
+    const group = groupedFees[key];
+    if (group.length > 1) {
+      // Sort to find the "best" fee to keep
+      // Priority: 1. Is Paid/Partial? 2. Has invoiceId? 3. Most recently updated
+      group.sort((a, b) => {
+        const aPaid = (a.status === 'paid' || a.status === 'partial') ? 1 : 0;
+        const bPaid = (b.status === 'paid' || b.status === 'partial') ? 1 : 0;
+        if (aPaid !== bPaid) return bPaid - aPaid;
+        
+        const aHasInv = a.invoiceId ? 1 : 0;
+        const bHasInv = b.invoiceId ? 1 : 0;
+        if (aHasInv !== bHasInv) return bHasInv - aHasInv;
+        
+        const aDate = a.updatedAt?.toDate ? a.updatedAt.toDate().getTime() : 0;
+        const bDate = b.updatedAt?.toDate ? b.updatedAt.toDate().getTime() : 0;
+        return bDate - aDate;
+      });
+
+      const bestFee = group[0];
+      const duplicates = group.slice(1);
+
+      for (const dup of duplicates) {
+        // Delete the duplicate fee
+        await deleteDoc(doc(db, 'fees', dup.id));
+        deletedFees++;
+
+        // If it had a distinct invoice, delete that too (unless it's shared)
+        if (dup.invoiceId && dup.invoiceId !== bestFee.invoiceId) {
+          try {
+            await deleteDoc(doc(db, 'invoices', dup.invoiceId));
+            deletedInvoices++;
+          } catch (e) {}
+        }
+      }
+      
+      // SYNC SOURCE OF TRUTH: Ensure the kept fee's paid amount matches its invoice exactly
+      if (bestFee.invoiceId) {
+        try {
+          const invSnap = await getDoc(doc(db, 'invoices', bestFee.invoiceId));
+          if (invSnap.exists()) {
+            const invData = invSnap.data();
+            const correctMonth = invData.month || bestFee.month || 'October 2026';
+            
+            // Fix invoice month if it's missing
+            if (!invData.month) {
+              await updateDoc(doc(db, 'invoices', bestFee.invoiceId), { month: correctMonth });
+            }
+
+            if (bestFee.paidAmount !== invData.paidAmount || bestFee.status !== invData.status || !bestFee.month) {
+              await updateDoc(doc(db, 'fees', bestFee.id), {
+                paidAmount: invData.paidAmount || 0,
+                status: invData.status || 'pending',
+                month: correctMonth
+              });
+              syncedFees++;
+            }
+          }
+        } catch(e) {}
+      }
+    } else if (group.length === 1) {
+      // Even if not a duplicate, sync its paid amount from invoice to fix the Rs 3000 vs 1500 mismatch!
+      const singleFee = group[0];
+      if (singleFee.invoiceId) {
+        try {
+          const invSnap = await getDoc(doc(db, 'invoices', singleFee.invoiceId));
+          if (invSnap.exists()) {
+            const invData = invSnap.data();
+            const correctMonth = invData.month || singleFee.month || 'October 2026';
+
+            // Fix invoice month if it's missing
+            if (!invData.month) {
+              await updateDoc(doc(db, 'invoices', singleFee.invoiceId), { month: correctMonth });
+            }
+
+            if (singleFee.paidAmount !== invData.paidAmount || singleFee.status !== invData.status || !singleFee.month) {
+              await updateDoc(doc(db, 'fees', singleFee.id), {
+                paidAmount: invData.paidAmount || 0,
+                status: invData.status || 'pending',
+                month: correctMonth
+              });
+              syncedFees++;
+            }
+          }
+        } catch(e) {}
+      }
+    }
+  }
+
+  return { deletedFees, deletedInvoices, syncedFees };
 }

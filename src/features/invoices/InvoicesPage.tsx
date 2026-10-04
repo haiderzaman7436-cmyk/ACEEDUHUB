@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
-  getStudentArrears,
+  getStudentArrears, syncMissingInvoices, deleteInvoice, cleanupDuplicateFees
 } from '@/features/fees/feeService';
 import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
@@ -97,6 +97,18 @@ export default function InvoicesPage() {
   }, [showAllMonths, selectedMonth]);
 
   useEffect(() => { loadInvoices(); }, [loadInvoices]);
+
+  // Auto-run cleanup silently on mount to fix missing months and sync statuses
+  useEffect(() => {
+    import('@/features/fees/feeService').then(({ cleanupDuplicateFees }) => {
+      cleanupDuplicateFees().then((res) => {
+        if (res.deletedFees > 0 || res.deletedInvoices > 0 || res.syncedFees > 0) {
+          toast.success(`Auto-fixed ${res.syncedFees} invoice/fee mismatches and cleaned ${res.deletedFees} duplicates.`);
+          loadInvoices();
+        }
+      });
+    });
+  }, [loadInvoices]);
 
   const handlePreviewClick = (inv: Invoice) => {
     setSelectedInvoice(inv);
@@ -237,6 +249,18 @@ export default function InvoicesPage() {
     }
   };
 
+  const handleDeleteInvoice = async (inv: Invoice) => {
+    if (!window.confirm('Are you sure you want to delete this invoice? The linked fee will also be deleted.')) return;
+    try {
+      await deleteInvoice(inv.id);
+      toast.success('Invoice and its linked fee deleted successfully.');
+      loadInvoices();
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to delete invoice.');
+    }
+  };
+
   const handlePaySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payInvTarget || payAmount <= 0 || !user) return;
@@ -262,14 +286,52 @@ export default function InvoicesPage() {
     setIsSubmitting(true);
     try {
       const result = await generateMonthlyFeesForAll();
-      if (result.success === 0 && result.skipped === 0) {
+      if (result.success === 0 && result.skipped === 0 && result.missingTemplates === 0) {
         toast.info('No active students found to generate fees for.');
       } else {
-        toast.success(`Monthly fees generated: ${result.success} new, ${result.skipped} skipped/already billed.`);
+        let msg = `Monthly fees generated: ${result.success} new.`;
+        if (result.skipped > 0) msg += ` ${result.skipped} already billed.`;
+        if (result.missingTemplates > 0) {
+          msg += ` WARNING: ${result.missingTemplates} students skipped (No Fee Template configured for their class!).`;
+          toast.warning(msg);
+        } else {
+          toast.success(msg);
+        }
         loadInvoices();
       }
     } catch {
       toast.error('Failed to generate monthly fees.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSyncMissingInvoices = async () => {
+    setIsSubmitting(true);
+    try {
+      const result = await syncMissingInvoices();
+      if (result.success === 0 && result.errors === 0) {
+        toast.info('No missing invoices found to sync.');
+      } else {
+        toast.success(`Synced ${result.success} missing invoices. ${result.errors > 0 ? `(${result.errors} errors)` : ''}`);
+        loadInvoices();
+      }
+    } catch {
+      toast.error('Failed to sync missing invoices.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCleanupDuplicates = async () => {
+    if (!window.confirm('This will find and delete duplicate fees/invoices. Are you sure?')) return;
+    setIsSubmitting(true);
+    try {
+      const res = await cleanupDuplicateFees();
+      toast.success(`Cleaned up ${res.deletedFees} duplicate fees and ${res.deletedInvoices} invoices.`);
+      loadInvoices();
+    } catch (e) {
+      toast.error('Failed to cleanup duplicates.');
     } finally {
       setIsSubmitting(false);
     }
@@ -438,6 +500,18 @@ export default function InvoicesPage() {
               <CheckCircle2 className="h-3.5 w-3.5" />
               Paid
             </span>
+          )}
+          
+          {hasRole(['admin', 'manager']) && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50"
+              onClick={() => handleDeleteInvoice(item)}
+              title="Delete Invoice"
+            >
+              <X className="h-4 w-4" />
+            </Button>
           )}
         </div>
       ),
@@ -832,7 +906,7 @@ export default function InvoicesPage() {
                   className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
                 >
                   <option value="">All Statuses</option>
-                  <option value="pending">Pending</option>
+                  <option value="sent">Pending</option>
                   <option value="partial">Partial</option>
                   <option value="paid">Paid</option>
                   <option value="overdue">Overdue</option>

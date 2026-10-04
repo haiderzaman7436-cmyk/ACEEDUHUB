@@ -22,7 +22,7 @@ import { seedDatabase, clearDummyData } from '@/lib/seedDatabase';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Badge } from '@/components/ui/badge';
 import type { AppUser, UserRole } from '@/types';
-import { ROLE_LABELS } from '@/lib/constants';
+import { ROLE_LABELS, SCHOOL_CLASSES, CLASS_MAP } from '@/lib/constants';
 import { getUsers, createUser, updateUserRole, toggleUserStatus } from './userService';
 
 export default function SettingsPage() {
@@ -376,12 +376,9 @@ function FeeStructureSettings() {
                 onChange={(e) => setClassName(e.target.value)}
                 className="w-full h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="Grade 5">Grade 5</option>
-                <option value="Grade 6">Grade 6</option>
-                <option value="Grade 7">Grade 7</option>
-                <option value="Grade 8">Grade 8</option>
-                <option value="Grade 9">Grade 9</option>
-                <option value="Grade 10">Grade 10</option>
+                {SCHOOL_CLASSES.map(c => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
               </select>
             </div>
             <div className="space-y-1.5">
@@ -462,7 +459,7 @@ function FeeStructureSettings() {
                 ) : (
                   templates.map((t) => (
                     <tr key={t.id}>
-                      <td className="px-4 py-3 font-semibold text-slate-700">{t.className}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">{CLASS_MAP[t.className] || t.className}</td>
                       <td className="px-4 py-3 capitalize text-slate-600">{t.feeType}</td>
                       <td className="px-4 py-3 text-slate-600">{t.description}</td>
                       <td className="px-4 py-3 font-bold text-slate-700">{formatCurrency(t.amount)}</td>

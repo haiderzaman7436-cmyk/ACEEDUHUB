@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import {
-  Plus, Edit2, Trash2, Loader2,
+  Plus, Edit2, Trash2, Loader2, Eye,
   Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays, ChevronDown,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
@@ -16,6 +16,7 @@ import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { StudentForm } from '@/features/students/StudentForm';
+import { StudentProfileModal } from '@/features/students/StudentProfileModal';
 import { getStatusColor, formatDate, formatCurrency } from '@/lib/utils';
 import { getStudents, deleteStudent, addStudent, updateStudent } from '@/features/students/studentService';
 import { getInvoices } from '@/features/fees/feeService';
@@ -48,6 +49,7 @@ export default function AcademyStudentsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formTitle, setFormTitle] = useState('Enroll Academy Student');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
 
   // Delete Dialog
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -216,6 +218,15 @@ export default function AcademyStudentsPage() {
       align: 'right',
       cell: (item) => (
         <div className="flex items-center gap-1.5 justify-end">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+            onClick={() => setViewingStudent(item)}
+            title="View Profile"
+          >
+            <Eye className="h-4 w-4" />
+          </Button>
           <Button
             size="icon"
             variant="ghost"
@@ -548,6 +559,14 @@ export default function AcademyStudentsPage() {
         </TabsContent>
         )}
       </Tabs>
+      
+      {/* Profile Modal */}
+      {viewingStudent && (
+        <StudentProfileModal
+          student={viewingStudent}
+          onClose={() => setViewingStudent(null)}
+        />
+      )}
     </div>
   );
 }
