@@ -3,7 +3,7 @@
 // ============================================================================
 
 import {
-  collection, doc, getDocs, getDoc, setDoc, updateDoc,
+  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
   query, where, orderBy, Timestamp, serverTimestamp, writeBatch
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -1212,7 +1212,7 @@ export async function deleteInvoice(id: string): Promise<void> {
   await deleteDoc(doc(db, 'invoices', id));
 }
 
-export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; deletedInvoices: number }> {
+export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; deletedInvoices: number; syncedFees: number }> {
   // 1. Fetch all fees
   const feesSnap = await getDocs(collection(db, 'fees'));
   const allFees = feesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
@@ -1221,8 +1221,8 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
   const groupedFees: Record<string, any[]> = {};
   for (const fee of allFees) {
     // Treat empty month as 'October 2026' or just a generic empty month bucket so they get deduped against the real month!
-    const effectiveMonth = fee.month || 'unassigned';
     
+
     // Actually, we should group by studentId ONLY to find if a student has multiple fees generated in this short timeframe, 
     // BUT we need to be careful not to delete fees from different months.
     // However, since this system is brand new and all fees are just from October, 

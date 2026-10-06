@@ -56,6 +56,8 @@ export interface Student {
   section: string;
   rollNumber?: string;
   address: string;
+  city?: string;
+  state?: string;
   phone?: string;
   email?: string;
   photoURL?: string;
@@ -68,6 +70,7 @@ export interface Student {
   nationality?: string;
   religion?: string;
   notes?: string;
+  medicalNotes?: string;
   createdAt: Date;
   updatedAt: Date;
   createdBy: string;

@@ -937,6 +937,30 @@ export default function InvoicesPage() {
                 ))}
               </select>
 
+              {/* Admin Tools */}
+              {hasRole(['admin', 'manager']) && (
+                <>
+                  <Button
+                    onClick={handleSyncMissingInvoices}
+                    disabled={isSubmitting || isLoading}
+                    variant="outline"
+                    className="h-10 text-xs gap-1 border-amber-200 text-amber-700 hover:bg-amber-50"
+                    title="Sync missing invoices from fees"
+                  >
+                    Sync Missing
+                  </Button>
+                  <Button
+                    onClick={handleCleanupDuplicates}
+                    disabled={isSubmitting || isLoading}
+                    variant="outline"
+                    className="h-10 text-xs gap-1 border-red-200 text-red-700 hover:bg-red-50"
+                    title="Cleanup duplicate fees and invoices"
+                  >
+                    Cleanup Duplicates
+                  </Button>
+                </>
+              )}
+
               {/* Generate */}
               <Button
                 onClick={handleGenerateMonthlyFees}
