@@ -11,8 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
-  getStudentArrears, syncMissingInvoices, deleteInvoice,
-  cleanupDuplicateInvoicesForMonth, cleanupNovemberInvoices
+  getStudentArrears, deleteInvoice
 } from '@/features/fees/feeService';
 import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
@@ -295,57 +294,6 @@ export default function InvoicesPage() {
       setIsSubmitting(false);
     }
   };
-
-  const handleSyncMissingInvoices = async () => {
-    setIsSubmitting(true);
-    try {
-      const result = await syncMissingInvoices();
-      if (result.success === 0 && result.errors === 0) {
-        toast.info('No missing invoices found to sync.');
-      } else {
-        toast.success(`Synced ${result.success} missing invoices. ${result.errors > 0 ? `(${result.errors} errors)` : ''}`);
-        loadInvoices();
-      }
-    } catch {
-      toast.error('Failed to sync missing invoices.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleCleanupDuplicates = async () => {
-    if (!window.confirm(`Clean up duplicate invoices for ${showAllMonths ? 'all months' : selectedMonth}? Each student will have exactly 1 invoice.`)) return;
-    setIsSubmitting(true);
-    try {
-      const res = await cleanupDuplicateInvoicesForMonth(selectedMonth);
-      toast.success(`Cleanup complete: Removed ${res.deletedInvoices} duplicate invoices. Exactly ${res.remainingInvoices} invoices remain for ${selectedMonth}.`);
-      loadInvoices();
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to cleanup duplicates.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDeduplicateNovember = async () => {
-    if (!window.confirm('Deduplicate November 2026 invoices down to exactly 147 invoices (1 per active student)?')) return;
-    setIsSubmitting(true);
-    try {
-      const res = await cleanupNovemberInvoices();
-      setSelectedMonth('November 2026');
-      setShowAllMonths(false);
-      toast.success(`November deduplication successful: Removed ${res.deletedInvoices} duplicates. Exactly ${res.remainingInvoices} invoices remain for November 2026.`);
-      loadInvoices();
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to deduplicate November invoices.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-
 
   const filteredInvoices = invoices.filter((inv) => {
     const matchesClass = !classFilter || inv.className.toLowerCase() === classFilter.toLowerCase();
@@ -966,39 +914,6 @@ export default function InvoicesPage() {
                   <option key={cls} value={cls}>{cls}</option>
                 ))}
               </select>
-
-              {/* Admin Tools */}
-              {hasRole(['admin', 'manager']) && (
-                <>
-                  <Button
-                    onClick={handleSyncMissingInvoices}
-                    disabled={isSubmitting || isLoading}
-                    variant="outline"
-                    className="h-10 text-xs gap-1 border-amber-200 text-amber-700 hover:bg-amber-50"
-                    title="Sync missing invoices from fees"
-                  >
-                    Sync Missing
-                  </Button>
-                  <Button
-                    onClick={handleCleanupDuplicates}
-                    disabled={isSubmitting || isLoading}
-                    variant="outline"
-                    className="h-10 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold"
-                    title={`Cleanup duplicate invoices for ${selectedMonth}`}
-                  >
-                    Cleanup Duplicates
-                  </Button>
-                  <Button
-                    onClick={handleDeduplicateNovember}
-                    disabled={isSubmitting || isLoading}
-                    className="h-10 text-xs gap-1.5 bg-red-600 hover:bg-red-700 text-white shadow-sm font-semibold"
-                    title="Deduplicate November 2026 invoices down to exactly 147 (1 per student)"
-                  >
-                    {isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span>🧹</span>}
-                    Deduplicate Nov (147 Target)
-                  </Button>
-                </>
-              )}
 
               {/* Generate */}
               <Button
