@@ -48,7 +48,22 @@ function toDate(val: unknown): Date {
   return new Date(val as string);
 }
 
-function getMonthDueDate(dueDayOfMonth = 10): string {
+function getMonthDueDate(dueDayOfMonth = 10, monthLabel?: string): string {
+  if (monthLabel) {
+    const parts = monthLabel.split(' ');
+    if (parts.length === 2) {
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      const mIdx = monthNames.findIndex(m => m.toLowerCase() === parts[0].toLowerCase());
+      const yr = parseInt(parts[1], 10);
+      if (mIdx !== -1 && !isNaN(yr)) {
+        const due = new Date(yr, mIdx, Math.min(28, dueDayOfMonth));
+        return due.toISOString().split('T')[0];
+      }
+    }
+  }
   const now = new Date();
   const due = new Date(now.getFullYear(), now.getMonth(), dueDayOfMonth);
   if (now.getDate() > dueDayOfMonth) {
@@ -113,8 +128,15 @@ export async function updateFeeTemplate(id: string, data: Partial<FeeTemplate>):
 
 // ── Bulk Monthly Fee Generation ─────────────────────────────────────────────
 
-export async function generateMonthlyFeesForAll(): Promise<{ success: number; skipped: number; missingTemplates: number }> {
-  const monthLabel = getMonthLabel();
+function getDefaultTuitionForClass(className = ''): number {
+  const c = className.toLowerCase();
+  if (c.includes('10') || c.includes('9') || c.includes('matric')) return 2500;
+  if (c.includes('8') || c.includes('7') || c.includes('6')) return 2000;
+  return 1500;
+}
+
+export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{ success: number; skipped: number; missingTemplates: number }> {
+  const monthLabel = targetMonth || getMonthLabel();
   const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
   const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
 
@@ -155,7 +177,14 @@ export async function generateMonthlyFeesForAll(): Promise<{ success: number; sk
         pendingFees.push({ student, type: 'student', entry });
       }
     } else {
-      missingTemplatesCount++;
+      // Default tuition fallback so no active student is skipped
+      const defaultAmt = getDefaultTuitionForClass(student.className);
+      pendingFees.push({
+        student,
+        type: 'default',
+        amount: defaultAmt,
+        description: 'Monthly Tuition Fee',
+      });
     }
   }
 
@@ -190,24 +219,31 @@ export async function generateMonthlyFeesForAll(): Promise<{ success: number; sk
 
     if (item.type === 'class') {
       const template = item.template;
-      dueDate = getMonthDueDate(template.dueDayOfMonth || 10);
+      dueDate = getMonthDueDate(template.dueDayOfMonth || 10, monthLabel);
       feeProps = {
         feeType: template.feeType,
         description: `${template.description} — ${monthLabel}`,
         amount: template.amount,
       };
-    } else {
+    } else if (item.type === 'student') {
       const entry = item.entry;
       let day = 10;
       if (entry.dueDate) {
         const d = new Date(entry.dueDate);
         if (!isNaN(d.getDate())) day = d.getDate();
       }
-      dueDate = getMonthDueDate(day);
+      dueDate = getMonthDueDate(day, monthLabel);
       feeProps = {
         feeType: 'other',
         description: `${entry.description} — ${monthLabel}`,
         amount: entry.amount,
+      };
+    } else {
+      dueDate = getMonthDueDate(10, monthLabel);
+      feeProps = {
+        feeType: 'tuition',
+        description: `${item.description} — ${monthLabel}`,
+        amount: item.amount,
       };
     }
 
@@ -794,9 +830,8 @@ export async function recordPayment(
 // ── Invoices CRUD ────────────────────────────────────────────────────────────
 
 export async function getInvoices(): Promise<Invoice[]> {
-  const q = query(collection(db, 'invoices'), orderBy('createdAt', 'desc'));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({
+  const snap = await getDocs(collection(db, 'invoices'));
+  const items = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
     status: parseInvoiceStatus(d.data()),
@@ -805,59 +840,45 @@ export async function getInvoices(): Promise<Invoice[]> {
     updatedAt: toDate(d.data().updatedAt),
     paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
   })) as Invoice[];
+  return items.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
 }
 
 export async function getInvoicesByMonth(monthLabel: string): Promise<Invoice[]> {
-  const parts = monthLabel.split(' ');
-  let startDate: Date | null = null;
-  let endDate: Date | null = null;
+  const all = await getInvoices();
+  const lowerLabel = monthLabel.toLowerCase().trim();
+  const parts = lowerLabel.split(' ');
+  const targetMonth = parts[0] || '';
+  const targetYear = parts[1] || '';
 
-  if (parts.length === 2) {
-    const monthIndex = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ].indexOf(parts[0]);
-    const year = parseInt(parts[1], 10);
-    if (monthIndex !== -1 && !isNaN(year)) {
-      startDate = new Date(year, monthIndex, 1);
-      endDate = new Date(year, monthIndex + 1, 1);
+  return all.filter((inv) => {
+    // 1. Direct match on month field
+    const invMonth = (inv.month || '').toLowerCase().trim();
+    if (invMonth) {
+      if (invMonth === lowerLabel) return true;
+      if (targetMonth && targetYear && invMonth.includes(targetMonth) && invMonth.includes(targetYear)) return true;
+      if (targetMonth && !targetYear && invMonth.includes(targetMonth)) return true;
     }
-  }
 
-  const q1 = query(collection(db, 'invoices'), where('month', '==', monthLabel));
-  const snap1 = await getDocs(q1);
-
-  let snap2 = { docs: [] as any[] };
-  if (startDate && endDate) {
-    const q2 = query(
-      collection(db, 'invoices'),
-      where('createdAt', '>=', startDate),
-      where('createdAt', '<', endDate)
-    );
-    snap2 = await getDocs(q2);
-  }
-
-  const map = new Map<string, any>();
-  snap1.docs.forEach(d => map.set(d.id, d));
-
-  snap2.docs.forEach(d => {
-    const data = d.data();
-    if (!data.month || data.month === monthLabel) {
-      map.set(d.id, d);
+    // 2. Fallback to dueDate
+    if (inv.dueDate) {
+      const d = new Date(inv.dueDate);
+      if (!isNaN(d.getTime())) {
+        const dMonth = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonth && targetYear && dMonth.includes(targetMonth) && dMonth.includes(targetYear)) return true;
+      }
     }
+
+    // 3. Fallback to createdAt
+    if (inv.createdAt) {
+      const c = new Date(inv.createdAt);
+      if (!isNaN(c.getTime())) {
+        const cMonth = c.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonth && targetYear && cMonth.includes(targetMonth) && cMonth.includes(targetYear)) return true;
+      }
+    }
+
+    return false;
   });
-
-  const results = Array.from(map.values()).map((d) => ({
-    id: d.id,
-    ...d.data(),
-    status: parseInvoiceStatus(d.data()),
-    paidAmount: d.data().paidAmount || 0,
-    createdAt: toDate(d.data().createdAt),
-    updatedAt: toDate(d.data().updatedAt),
-    paidAt: d.data().paidAt ? toDate(d.data().paidAt) : undefined,
-  })) as Invoice[];
-
-  return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export async function getInvoicesByStudent(studentId: string): Promise<Invoice[]> {
@@ -1217,17 +1238,12 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
   const feesSnap = await getDocs(collection(db, 'fees'));
   const allFees = feesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
-  // 2. Group by studentId + month
+  // 2. Group by studentId + month + feeType to ONLY dedupe identical duplicate runs
   const groupedFees: Record<string, any[]> = {};
   for (const fee of allFees) {
-    // Treat empty month as 'October 2026' or just a generic empty month bucket so they get deduped against the real month!
-    
-
-    // Actually, we should group by studentId ONLY to find if a student has multiple fees generated in this short timeframe, 
-    // BUT we need to be careful not to delete fees from different months.
-    // However, since this system is brand new and all fees are just from October, 
-    // let's group entirely by studentId right now to nuke all duplicates across the board.
-    const key = fee.studentId; 
+    const mKey = (fee.month || 'unspecified').trim().toLowerCase();
+    const tKey = (fee.feeType || fee.description || 'fee').trim().toLowerCase();
+    const key = `${fee.studentId}_${mKey}_${tKey}`; 
     if (!groupedFees[key]) groupedFees[key] = [];
     groupedFees[key].push(fee);
   }
@@ -1326,4 +1342,96 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
   }
 
   return { deletedFees, deletedInvoices, syncedFees };
+}
+
+// ── Direct Academy Fee Payment ───────────────────────────────────────────────
+export async function recordAcademyFeePayment(params: {
+  student: Student;
+  amount: number;
+  month: string;
+  feeType?: string;
+  description: string;
+  paymentMethod: 'cash' | 'bank_transfer' | 'cheque' | 'online';
+  collectorId: string;
+  collectorName: string;
+  notes?: string;
+  dueDate?: string;
+}): Promise<{ invoice: Invoice; fee: Fee }> {
+  const now = new Date();
+  const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
+  const feeId = 'fee-' + Math.random().toString(36).substring(2, 9);
+  const invNumber = await getNextInvoiceNumber();
+  const receipt = generateReceiptNumber();
+
+  const newFee: Fee = {
+    id: feeId,
+    studentId: params.student.id,
+    studentName: `${params.student.firstName} ${params.student.lastName}`,
+    className: params.student.className,
+    section: params.student.section,
+    feeType: 'tuition' as any,
+    description: params.description,
+    amount: params.amount,
+    dueDate: params.dueDate || now.toISOString().split('T')[0],
+    paidAmount: params.amount,
+    paidDate: now.toISOString().split('T')[0],
+    status: 'paid',
+    paymentMethod: params.paymentMethod,
+    receiptNumber: receipt,
+    collectedBy: params.collectorId,
+    collectedByName: params.collectorName,
+    notes: params.notes,
+    invoiceId: invId,
+    month: params.month,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const newInvoice: Invoice = {
+    id: invId,
+    invoiceNumber: invNumber,
+    studentId: params.student.id,
+    studentName: `${params.student.firstName} ${params.student.lastName}`,
+    className: params.student.className,
+    section: params.student.section,
+    category: 'academy',
+    items: [
+      {
+        id: 'item-1',
+        description: params.description,
+        quantity: 1,
+        unitPrice: params.amount,
+        total: params.amount,
+      },
+    ],
+    subtotal: params.amount,
+    discount: 0,
+    discountType: 'fixed',
+    tax: 0,
+    grandTotal: params.amount,
+    paidAmount: params.amount,
+    status: 'paid',
+    dueDate: params.dueDate || now.toISOString().split('T')[0],
+    paidAt: now,
+    month: params.month,
+    feeIds: [feeId],
+    notes: params.notes || 'Academy fee payment recorded.',
+    createdAt: now,
+    updatedAt: now,
+    createdBy: params.collectorId,
+  };
+
+  await setDoc(doc(db, 'fees', feeId), {
+    ...newFee,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  await setDoc(doc(db, 'invoices', invId), {
+    ...newInvoice,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  return { invoice: newInvoice, fee: newFee };
 }

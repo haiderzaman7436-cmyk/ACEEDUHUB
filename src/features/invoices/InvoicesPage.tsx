@@ -78,7 +78,7 @@ export default function InvoicesPage() {
   const [classFilter, setClassFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [showAllMonths, setShowAllMonths] = useState(false);
+  const [showAllMonths, setShowAllMonths] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonthLabel());
 
   // Split month filter for UI
@@ -98,12 +98,11 @@ export default function InvoicesPage() {
 
   useEffect(() => { loadInvoices(); }, [loadInvoices]);
 
-  // Auto-run cleanup silently on mount to fix missing months and sync statuses
+  // Auto-run sync on mount to ensure all past fees have invoices with correct statuses
   useEffect(() => {
-    import('@/features/fees/feeService').then(({ cleanupDuplicateFees }) => {
-      cleanupDuplicateFees().then((res) => {
-        if (res.deletedFees > 0 || res.deletedInvoices > 0 || res.syncedFees > 0) {
-          toast.success(`Auto-fixed ${res.syncedFees} invoice/fee mismatches and cleaned ${res.deletedFees} duplicates.`);
+    import('@/features/fees/feeService').then(({ syncMissingInvoices }) => {
+      syncMissingInvoices().then((res) => {
+        if (res.success > 0) {
           loadInvoices();
         }
       });
@@ -285,11 +284,12 @@ export default function InvoicesPage() {
   const handleGenerateMonthlyFees = async () => {
     setIsSubmitting(true);
     try {
-      const result = await generateMonthlyFeesForAll();
+      const targetMonth = showAllMonths ? undefined : selectedMonth;
+      const result = await generateMonthlyFeesForAll(targetMonth);
       if (result.success === 0 && result.skipped === 0 && result.missingTemplates === 0) {
         toast.info('No active students found to generate fees for.');
       } else {
-        let msg = `Monthly fees generated: ${result.success} new.`;
+        let msg = `Monthly fees generated for ${targetMonth || 'current month'}: ${result.success} new.`;
         if (result.skipped > 0) msg += ` ${result.skipped} already billed.`;
         if (result.missingTemplates > 0) {
           msg += ` WARNING: ${result.missingTemplates} students skipped (No Fee Template configured for their class!).`;
@@ -378,6 +378,16 @@ export default function InvoicesPage() {
             </span>
           </div>
         </div>
+      ),
+    },
+    {
+      key: 'month',
+      header: 'Month',
+      sortable: true,
+      cell: (item) => (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+          {item.month || (item.createdAt ? formatDate(item.createdAt) : '—')}
+        </span>
       ),
     },
     {
@@ -857,14 +867,18 @@ export default function InvoicesPage() {
               <div className="flex gap-2">
                 <div className="relative">
                   <select
-                    value={monthPart}
+                    value={showAllMonths ? 'all' : monthPart}
                     onChange={(e) => {
-                      setSelectedMonth(`${e.target.value} ${yearPart}`);
-                      setShowAllMonths(false);
+                      if (e.target.value === 'all') {
+                        setShowAllMonths(true);
+                      } else {
+                        setSelectedMonth(`${e.target.value} ${yearPart}`);
+                        setShowAllMonths(false);
+                      }
                     }}
-                    disabled={showAllMonths}
-                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
                   >
+                    <option value="all">All Months</option>
                     {MONTHS.map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}

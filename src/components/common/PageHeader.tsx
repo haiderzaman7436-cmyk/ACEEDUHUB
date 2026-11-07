@@ -2,17 +2,22 @@ import { ArrowLeft } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 
+export interface PageHeaderAction {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
+  className?: string;
+}
+
 interface PageHeaderProps {
   title: string;
   description?: string;
   showBackButton?: boolean;
   backHref?: string;
-  action?: {
-    label: string;
-    onClick: () => void;
-    icon?: React.ReactNode;
-    variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link';
-  };
+  action?: PageHeaderAction;
+  actions?: PageHeaderAction[];
+  children?: React.ReactNode;
 }
 
 export function PageHeader({
@@ -21,6 +26,8 @@ export function PageHeader({
   showBackButton = false,
   backHref,
   action,
+  actions,
+  children,
 }: PageHeaderProps) {
   const navigate = useNavigate();
 
@@ -57,16 +64,31 @@ export function PageHeader({
         </div>
       </div>
 
-      {action && (
-        <div className="mt-3 md:mt-0 flex shrink-0 items-center gap-2">
-          <Button
-            variant={action.variant || 'default'}
-            onClick={action.onClick}
-            className="flex items-center gap-2"
-          >
-            {action.icon}
-            {action.label}
-          </Button>
+      {(action || actions || children) && (
+        <div className="mt-3 md:mt-0 flex shrink-0 items-center gap-2 flex-wrap">
+          {actions
+            ? actions.map((act, idx) => (
+                <Button
+                  key={idx}
+                  variant={act.variant || 'default'}
+                  onClick={act.onClick}
+                  className={`flex items-center gap-2 ${act.className || ''}`}
+                >
+                  {act.icon}
+                  {act.label}
+                </Button>
+              ))
+            : action ? (
+                <Button
+                  variant={action.variant || 'default'}
+                  onClick={action.onClick}
+                  className={`flex items-center gap-2 ${action.className || ''}`}
+                >
+                  {action.icon}
+                  {action.label}
+                </Button>
+              ) : null}
+          {children}
         </div>
       )}
     </div>

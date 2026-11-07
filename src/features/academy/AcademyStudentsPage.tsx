@@ -6,7 +6,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   Plus, Edit2, Trash2, Loader2, Eye,
-  Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays, ChevronDown,
+  Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays, ChevronDown, CreditCard,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -17,11 +17,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { StudentForm } from '@/features/students/StudentForm';
 import { StudentProfileModal } from '@/features/students/StudentProfileModal';
+import { AcademyPaymentModal, type AcademyPaymentReceiptData } from './AcademyPaymentModal';
+import { FeeReceiptPrint } from '@/features/fees/FeeReceiptPrint';
 import { getStatusColor, formatDate, formatCurrency } from '@/lib/utils';
 import { getStudents, deleteStudent, addStudent, updateStudent } from '@/features/students/studentService';
 import { getInvoices } from '@/features/fees/feeService';
 import type { StudentFormInput } from '@/features/students/studentValidation';
-import type { Student, Invoice } from '@/types';
+import type { Student, Invoice, Fee } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import { toast } from 'sonner';
 
@@ -56,9 +58,16 @@ export default function AcademyStudentsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Payment Modal States
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
+  const [receiptData, setReceiptData] = useState<{ invoice: Invoice; student: Student; fees: Fee[] } | null>(null);
+
   // Analysis Filter State
   const currentMonthLabel = useMemo(() => getCurrentMonthLabel(), []);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthLabel);
+  const [showAllMonths, setShowAllMonths] = useState<boolean>(true);
 
   // Split selectedMonth for UI
   const [monthPart, yearPart] = selectedMonth ? selectedMonth.split(' ') : getCurrentMonthLabel().split(' ');
@@ -87,6 +96,12 @@ export default function AcademyStudentsPage() {
     setSelectedStudent(null);
     setFormTitle('Enroll New Academy Student');
     setIsFormOpen(true);
+  };
+
+  const handleOpenPayment = (student?: Student | null, invoice?: Invoice | null) => {
+    setPaymentStudent(student || null);
+    setPaymentInvoice(invoice || null);
+    setIsPaymentOpen(true);
   };
 
   const handleEditClick = (student: Student) => {
@@ -139,6 +154,7 @@ export default function AcademyStudentsPage() {
 
   // --- Financial Analysis ---
   const monthInvoices = invoices.filter((inv) => {
+    if (showAllMonths) return true;
     let mStr = (inv.month || '').toLowerCase();
     if (!mStr && inv.createdAt) {
       mStr = new Date(inv.createdAt).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
@@ -219,6 +235,15 @@ export default function AcademyStudentsPage() {
       cell: (item) => (
         <div className="flex items-center gap-1.5 justify-end">
           <Button
+            size="sm"
+            onClick={() => handleOpenPayment(item)}
+            className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs font-semibold shadow-sm transition-all"
+            title={`Record Payment for ${item.firstName}`}
+          >
+            <CreditCard className="h-3.5 w-3.5" />
+            <span>Pay</span>
+          </Button>
+          <Button
             size="icon"
             variant="ghost"
             className="h-8 w-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
@@ -267,6 +292,15 @@ export default function AcademyStudentsPage() {
       ),
     },
     {
+      key: 'month',
+      header: 'Billing Month',
+      cell: (item) => (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-100">
+          {item.month || (item.createdAt ? formatDate(item.createdAt) : '—')}
+        </span>
+      ),
+    },
+    {
       key: 'grandTotal',
       header: 'Billed',
       cell: (item) => <span className="font-semibold">{formatCurrency(item.grandTotal)}</span>,
@@ -284,6 +318,33 @@ export default function AcademyStudentsPage() {
         if (item.status === 'overdue') return <Badge className="bg-red-100 text-red-700">Overdue</Badge>;
         return <Badge className="bg-amber-100 text-amber-700">Pending</Badge>;
       },
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      align: 'right',
+      cell: (item) => (
+        <div className="flex items-center gap-1.5 justify-end">
+          {item.status !== 'paid' && item.status !== 'cancelled' ? (
+            <Button
+              size="sm"
+              onClick={() => {
+                const stud = students.find((s) => s.id === item.studentId);
+                handleOpenPayment(stud, item);
+              }}
+              className="h-7 px-2.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1 font-semibold rounded-lg shadow-sm"
+              title="Pay this invoice"
+            >
+              <CreditCard className="h-3 w-3" />
+              Pay
+            </Button>
+          ) : (
+            <span className="text-xs text-emerald-600 font-semibold flex items-center gap-1">
+              ✓ Settled
+            </span>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -327,11 +388,22 @@ export default function AcademyStudentsPage() {
       <PageHeader
         title="Academy Dashboard"
         description="Manage academy students and track monthly financial analysis."
-        action={{
-          label: 'Enroll Student',
-          onClick: handleEnrollClick,
-          icon: <Plus className="h-4 w-4" />,
-        }}
+        actions={[
+          {
+            label: 'Record Payment',
+            onClick: () => handleOpenPayment(),
+            icon: <CreditCard className="h-4 w-4" />,
+            variant: 'default',
+            className: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm font-semibold',
+          },
+          {
+            label: 'Enroll Student',
+            onClick: handleEnrollClick,
+            icon: <Plus className="h-4 w-4" />,
+            variant: 'default',
+            className: 'bg-blue-600 hover:bg-blue-700 text-white font-semibold',
+          },
+        ]}
       />
 
       <Tabs defaultValue="students" className="space-y-6">
@@ -424,15 +496,39 @@ export default function AcademyStudentsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-800">Financial Analysis</h3>
-              <p className="text-sm text-slate-500">Track fee collections and due amounts for Academy students.</p>
+              <p className="text-sm text-slate-500">
+                {showAllMonths
+                  ? 'Showing fee collections and invoices across all months'
+                  : `Tracking fee collections and due amounts for ${selectedMonth}`}
+              </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-center flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowAllMonths(!showAllMonths)}
+                className={`h-10 px-3.5 gap-1.5 text-xs font-semibold rounded-xl border transition-all ${
+                  showAllMonths
+                    ? 'bg-violet-600 text-white border-violet-600 shadow-sm'
+                    : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'
+                }`}
+              >
+                {showAllMonths ? '✓ Showing All Months' : 'Show All Months'}
+              </Button>
               <div className="relative">
                 <select
                   className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
-                  value={monthPart}
-                  onChange={(e) => setSelectedMonth(`${e.target.value} ${yearPart}`)}
+                  value={showAllMonths ? 'all' : monthPart}
+                  onChange={(e) => {
+                    if (e.target.value === 'all') {
+                      setShowAllMonths(true);
+                    } else {
+                      setSelectedMonth(`${e.target.value} ${yearPart}`);
+                      setShowAllMonths(false);
+                    }
+                  }}
                 >
+                  <option value="all">All Months</option>
                   {MONTHS.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -441,9 +537,13 @@ export default function AcademyStudentsPage() {
               </div>
               <div className="relative">
                 <select
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
+                  disabled={showAllMonths}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10 disabled:opacity-50"
                   value={yearPart}
-                  onChange={(e) => setSelectedMonth(`${monthPart} ${e.target.value}`)}
+                  onChange={(e) => {
+                    setSelectedMonth(`${monthPart} ${e.target.value}`);
+                    setShowAllMonths(false);
+                  }}
                 >
                   {YEARS.map((y) => (
                     <option key={y} value={y}>{y}</option>
@@ -565,6 +665,36 @@ export default function AcademyStudentsPage() {
         <StudentProfileModal
           student={viewingStudent}
           onClose={() => setViewingStudent(null)}
+        />
+      )}
+
+      {/* Academy Payment Modal */}
+      <AcademyPaymentModal
+        isOpen={isPaymentOpen}
+        onClose={() => {
+          setIsPaymentOpen(false);
+          setPaymentStudent(null);
+          setPaymentInvoice(null);
+        }}
+        onSuccess={(data?: AcademyPaymentReceiptData) => {
+          loadData();
+          if (data) {
+            setReceiptData(data);
+          }
+        }}
+        students={students}
+        invoices={invoices}
+        initialStudent={paymentStudent}
+        initialInvoice={paymentInvoice}
+      />
+
+      {/* Printable Fee Receipt Modal */}
+      {receiptData && (
+        <FeeReceiptPrint
+          invoice={receiptData.invoice}
+          student={receiptData.student}
+          allFees={receiptData.fees}
+          onClose={() => setReceiptData(null)}
         />
       )}
     </div>
