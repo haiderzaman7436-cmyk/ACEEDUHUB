@@ -47,6 +47,10 @@ export default function FinancePage() {
 
   // Filter transactions for calculations
   const monthlyInvoices = invoices.filter((inv) => {
+    const invMonth = (inv.month || '').toLowerCase().trim();
+    if (invMonth) {
+      return invMonth.includes(selectedMonth.toLowerCase()) && invMonth.includes(selectedYear.toString());
+    }
     const d = new Date(inv.createdAt);
     const monthMatch = d.getMonth() === MONTHS.indexOf(selectedMonth);
     const yearMatch = d.getFullYear() === selectedYear;

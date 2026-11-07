@@ -142,10 +142,14 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
 
   if (students.length === 0) return { success: 0, skipped: 0, missingTemplates: 0 };
 
-  // PRE-FETCH: Get ALL fees for the current month
-  const existingFeesSnap = await getDocs(query(collection(db, 'fees'), where('month', '==', monthLabel)));
+  // PRE-FETCH: Get ALL existing fees and invoices for the target month to prevent any duplicate generation
+  const [existingFeesSnap, existingInvoices] = await Promise.all([
+    getDocs(query(collection(db, 'fees'), where('month', '==', monthLabel))),
+    getInvoicesByMonth(monthLabel)
+  ]);
   const billedStudentIds = new Set<string>();
   existingFeesSnap.docs.forEach(d => billedStudentIds.add(d.data().studentId));
+  existingInvoices.forEach(inv => billedStudentIds.add(inv.studentId));
 
   // PRE-FETCH: Get ALL fee templates and map by className
   const templatesSnap = await getDocs(collection(db, 'feeTemplates'));
@@ -156,7 +160,24 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
     templatesByClass[data.className].push(data);
   });
 
-  const pendingFees: any[] = [];
+  interface StudentBillGroup {
+    student: Student;
+    items: Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      total: number;
+      feeType: string;
+      dueDate: string;
+    }>;
+    totalAmount: number;
+    primaryDueDate: string;
+    primaryFeeType: string;
+    primaryDescription: string;
+  }
+
+  const pendingStudentBills: StudentBillGroup[] = [];
   let skipCount = 0;
   let missingTemplatesCount = 0;
 
@@ -169,37 +190,87 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
     const classTemplates = templatesByClass[student.className] || [];
     const studentTemplates = student.feeEntries || [];
     
+    const items: StudentBillGroup['items'] = [];
+    let total = 0;
+    let dueDate = getMonthDueDate(10, monthLabel);
+    let primaryFeeType = 'tuition';
+    let primaryDesc = `Monthly Tuition Fee — ${monthLabel}`;
+
     if (classTemplates.length > 0 || studentTemplates.length > 0) {
+      let idx = 1;
       for (const template of classTemplates) {
-        pendingFees.push({ student, type: 'class', template });
+        const itemDue = getMonthDueDate(template.dueDayOfMonth || 10, monthLabel);
+        dueDate = itemDue;
+        primaryFeeType = template.feeType;
+        primaryDesc = `${template.description} — ${monthLabel}`;
+        items.push({
+          id: `item-${idx++}`,
+          description: `${template.description} — ${monthLabel}`,
+          quantity: 1,
+          unitPrice: template.amount,
+          total: template.amount,
+          feeType: template.feeType,
+          dueDate: itemDue,
+        });
+        total += template.amount;
       }
       for (const entry of studentTemplates) {
-        pendingFees.push({ student, type: 'student', entry });
+        let day = 10;
+        if (entry.dueDate) {
+          const d = new Date(entry.dueDate);
+          if (!isNaN(d.getDate())) day = d.getDate();
+        }
+        const itemDue = getMonthDueDate(day, monthLabel);
+        items.push({
+          id: `item-${idx++}`,
+          description: `${entry.description} — ${monthLabel}`,
+          quantity: 1,
+          unitPrice: entry.amount,
+          total: entry.amount,
+          feeType: 'other',
+          dueDate: itemDue,
+        });
+        total += entry.amount;
       }
     } else {
       // Default tuition fallback so no active student is skipped
       const defaultAmt = getDefaultTuitionForClass(student.className);
-      pendingFees.push({
+      items.push({
+        id: 'item-1',
+        description: `Monthly Tuition Fee — ${monthLabel}`,
+        quantity: 1,
+        unitPrice: defaultAmt,
+        total: defaultAmt,
+        feeType: 'tuition',
+        dueDate,
+      });
+      total = defaultAmt;
+    }
+
+    if (items.length > 0) {
+      pendingStudentBills.push({
         student,
-        type: 'default',
-        amount: defaultAmt,
-        description: 'Monthly Tuition Fee',
+        items,
+        totalAmount: total,
+        primaryDueDate: dueDate,
+        primaryFeeType,
+        primaryDescription: primaryDesc,
       });
     }
   }
 
-  if (pendingFees.length === 0) {
+  if (pendingStudentBills.length === 0) {
     return { success: 0, skipped: skipCount, missingTemplates: missingTemplatesCount };
   }
 
-  // Reserve all required invoice numbers in a single super-fast transaction
-  const reservedNumbers = await reserveInvoiceNumbers(pendingFees.length);
+  // Reserve exactly 1 invoice number per student in a single super-fast transaction
+  const reservedNumbers = await reserveInvoiceNumbers(pendingStudentBills.length);
   
   let currentBatch = writeBatch(db);
   let batchCount = 0;
   
   const commitBatchIfNeeded = async () => {
-    if (batchCount >= 490) { // Max 500 writes per batch
+    if (batchCount >= 450) { // Max 500 writes per batch
       await currentBatch.commit();
       currentBatch = writeBatch(db);
       batchCount = 0;
@@ -208,44 +279,12 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
 
   const successfulStudentIds = new Set<string>();
 
-  for (let i = 0; i < pendingFees.length; i++) {
-    const item = pendingFees[i];
-    const { student } = item;
+  for (let i = 0; i < pendingStudentBills.length; i++) {
+    const bill = pendingStudentBills[i];
+    const { student, items, totalAmount, primaryDueDate, primaryFeeType, primaryDescription } = bill;
     const invNumber = reservedNumbers[i];
     const feeId = 'fee-' + Math.random().toString(36).substring(2, 9);
     const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
-    let feeProps: any = {};
-    let dueDate: string;
-
-    if (item.type === 'class') {
-      const template = item.template;
-      dueDate = getMonthDueDate(template.dueDayOfMonth || 10, monthLabel);
-      feeProps = {
-        feeType: template.feeType,
-        description: `${template.description} — ${monthLabel}`,
-        amount: template.amount,
-      };
-    } else if (item.type === 'student') {
-      const entry = item.entry;
-      let day = 10;
-      if (entry.dueDate) {
-        const d = new Date(entry.dueDate);
-        if (!isNaN(d.getDate())) day = d.getDate();
-      }
-      dueDate = getMonthDueDate(day, monthLabel);
-      feeProps = {
-        feeType: 'other',
-        description: `${entry.description} — ${monthLabel}`,
-        amount: entry.amount,
-      };
-    } else {
-      dueDate = getMonthDueDate(10, monthLabel);
-      feeProps = {
-        feeType: 'tuition',
-        description: `${item.description} — ${monthLabel}`,
-        amount: item.amount,
-      };
-    }
 
     const newFee: any = {
       id: feeId,
@@ -253,8 +292,10 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
       studentName: `${student.firstName} ${student.lastName}`,
       className: student.className,
       section: student.section,
-      ...feeProps,
-      dueDate,
+      feeType: primaryFeeType,
+      description: primaryDescription,
+      amount: totalAmount,
+      dueDate: primaryDueDate,
       paidAmount: 0,
       status: 'pending',
       month: monthLabel,
@@ -270,27 +311,25 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
       studentName: `${student.firstName} ${student.lastName}`,
       className: student.className,
       section: student.section,
-      items: [
-        {
-          id: 'item-1',
-          description: feeProps.description || 'Fee',
-          quantity: 1,
-          unitPrice: feeProps.amount,
-          total: feeProps.amount,
-        },
-      ],
-      subtotal: feeProps.amount,
+      items: items.map(it => ({
+        id: it.id,
+        description: it.description,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        total: it.total,
+      })),
+      subtotal: totalAmount,
       discount: 0,
       discountType: 'fixed',
       tax: 0,
-      grandTotal: feeProps.amount,
+      grandTotal: totalAmount,
       paidAmount: 0,
       status: 'sent',
-      dueDate,
+      dueDate: primaryDueDate,
       month: monthLabel,
       category: student.category || 'school',
       feeIds: [feeId],
-      notes: `Due by ${dueDate ? new Date(dueDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the due date'}.`,
+      notes: `Due by ${primaryDueDate ? new Date(primaryDueDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the due date'}.`,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -531,51 +570,13 @@ export async function getFees(): Promise<Fee[]> {
 }
 
 export async function getFeesByMonth(monthLabel: string): Promise<Fee[]> {
-  // Try to parse the month and year to fallback to createdAt range
-  const parts = monthLabel.split(' ');
-  let startDate: Date | null = null;
-  let endDate: Date | null = null;
+  const snap = await getDocs(collection(db, 'fees'));
+  const lowerLabel = monthLabel.toLowerCase().trim();
+  const parts = lowerLabel.split(' ');
+  const targetMonth = parts[0] || '';
+  const targetYear = parts[1] || '';
 
-  if (parts.length === 2) {
-    const monthIndex = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ].indexOf(parts[0]);
-    const year = parseInt(parts[1], 10);
-    if (monthIndex !== -1 && !isNaN(year)) {
-      startDate = new Date(year, monthIndex, 1);
-      endDate = new Date(year, monthIndex + 1, 1);
-    }
-  }
-
-  // 1. Query by exact month label
-  const q1 = query(collection(db, 'fees'), where('month', '==', monthLabel));
-  const snap1 = await getDocs(q1);
-
-  // 2. Query by createdAt range (to catch custom/older fees that lack the month field)
-  let snap2 = { docs: [] as any[] };
-  if (startDate && endDate) {
-    const q2 = query(
-      collection(db, 'fees'),
-      where('createdAt', '>=', startDate),
-      where('createdAt', '<', endDate)
-    );
-    snap2 = await getDocs(q2);
-  }
-
-  // Merge and deduplicate
-  const map = new Map<string, any>();
-  snap1.docs.forEach(d => map.set(d.id, d));
-
-  // For snap2 (createdAt fallback), only include if the record doesn't belong to a DIFFERENT month
-  snap2.docs.forEach(d => {
-    const data = d.data();
-    if (!data.month || data.month === monthLabel) {
-      map.set(d.id, d);
-    }
-  });
-
-  const results = Array.from(map.values()).map((d) => ({
+  const all = snap.docs.map((d) => ({
     id: d.id,
     ...d.data(),
     status: parseFeeStatus(d.data()),
@@ -584,7 +585,40 @@ export async function getFeesByMonth(monthLabel: string): Promise<Fee[]> {
     updatedAt: toDate(d.data().updatedAt),
   })) as Fee[];
 
-  return results.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const results = all.filter((fee) => {
+    // 1. Match month field strictly
+    const feeMonth = (fee.month || '').toLowerCase().trim();
+    if (feeMonth) {
+      if (feeMonth === lowerLabel) return true;
+      if (targetMonth && targetYear && feeMonth.includes(targetMonth) && feeMonth.includes(targetYear)) return true;
+      if (targetMonth && !targetYear && feeMonth.includes(targetMonth)) return true;
+      return false;
+    }
+
+    // 2. Fallback to dueDate ONLY IF month is absent
+    if (fee.dueDate) {
+      const d = new Date(fee.dueDate);
+      if (!isNaN(d.getTime())) {
+        const dMonth = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonth && targetYear && dMonth.includes(targetMonth) && dMonth.includes(targetYear)) return true;
+        if (targetMonth && !targetYear && dMonth.includes(targetMonth)) return true;
+      }
+    }
+
+    // 3. Fallback to createdAt ONLY IF month is absent
+    if (fee.createdAt) {
+      const c = new Date(fee.createdAt);
+      if (!isNaN(c.getTime())) {
+        const cMonth = c.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonth && targetYear && cMonth.includes(targetMonth) && cMonth.includes(targetYear)) return true;
+        if (targetMonth && !targetYear && cMonth.includes(targetMonth)) return true;
+      }
+    }
+
+    return false;
+  });
+
+  return results.sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0));
 }
 
 
@@ -737,7 +771,6 @@ export async function recordPayment(
 
   const currentBalance = existing.amount - (existing.paidAmount || 0);
   const amountToApplyToCurrent = Math.min(paymentData.amount, currentBalance);
-  let excessAmount = paymentData.amount - amountToApplyToCurrent;
 
   const newPaidAmount = (existing.paidAmount || 0) + amountToApplyToCurrent;
   const isFullyPaid = newPaidAmount >= existing.amount;
@@ -772,58 +805,7 @@ export async function recordPayment(
     }
   }
 
-  // Handle excess payment by applying to older fees
-  if (excessAmount > 0) {
-    try {
-      const q = query(collection(db, 'fees'), where('studentId', '==', existing.studentId));
-      const studentFeesSnap = await getDocs(q);
-
-      const olderFees = studentFeesSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Fee))
-        .filter(f => {
-          if (f.id === existing.id) return false;
-          const status = parseFeeStatus(f);
-          return status !== 'paid' && new Date(f.createdAt).getTime() < new Date(existing.createdAt).getTime();
-        })
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-
-      for (const olderFee of olderFees) {
-        if (excessAmount <= 0) break;
-
-        const olderBalance = olderFee.amount - (olderFee.paidAmount || 0);
-        if (olderBalance > 0) {
-          const applyToOlder = Math.min(excessAmount, olderBalance);
-          excessAmount -= applyToOlder;
-
-          const newOlderPaid = (olderFee.paidAmount || 0) + applyToOlder;
-          const isOlderFullyPaid = newOlderPaid >= olderFee.amount;
-
-          await updateDoc(doc(db, 'fees', olderFee.id), {
-            paidAmount: newOlderPaid,
-            status: isOlderFullyPaid ? 'paid' : 'partial',
-            paidDate: now.toISOString().split('T')[0],
-            paymentMethod: paymentData.method,
-            receiptNumber: receipt,
-            collectedBy: paymentData.collectorId,
-            collectedByName: paymentData.collectorName,
-            updatedAt: serverTimestamp(),
-          });
-
-          if (olderFee.invoiceId) {
-            await updateDoc(doc(db, 'invoices', olderFee.invoiceId), {
-              paidAmount: newOlderPaid,
-              status: isOlderFullyPaid ? 'paid' : 'sent',
-              ...(isOlderFullyPaid ? { paidAt: serverTimestamp() } : {}),
-              updatedAt: serverTimestamp(),
-            });
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Error applying excess amount to older fees', e);
-    }
-  }
-
+  // Note: Monthly isolation — payment stays strictly with this fee and its linked invoice.
   return { ...existing, ...updated } as Fee;
 }
 
@@ -851,29 +833,33 @@ export async function getInvoicesByMonth(monthLabel: string): Promise<Invoice[]>
   const targetYear = parts[1] || '';
 
   return all.filter((inv) => {
-    // 1. Direct match on month field
+    // 1. Direct match on month field — STRICT ISOLATION
     const invMonth = (inv.month || '').toLowerCase().trim();
     if (invMonth) {
       if (invMonth === lowerLabel) return true;
       if (targetMonth && targetYear && invMonth.includes(targetMonth) && invMonth.includes(targetYear)) return true;
       if (targetMonth && !targetYear && invMonth.includes(targetMonth)) return true;
+      // If invoice has a month explicitly set, it belongs strictly to that month and not others!
+      return false;
     }
 
-    // 2. Fallback to dueDate
+    // 2. Fallback to dueDate ONLY IF month is absent
     if (inv.dueDate) {
       const d = new Date(inv.dueDate);
       if (!isNaN(d.getTime())) {
         const dMonth = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
         if (targetMonth && targetYear && dMonth.includes(targetMonth) && dMonth.includes(targetYear)) return true;
+        if (targetMonth && !targetYear && dMonth.includes(targetMonth)) return true;
       }
     }
 
-    // 3. Fallback to createdAt
+    // 3. Fallback to createdAt ONLY IF month is absent
     if (inv.createdAt) {
       const c = new Date(inv.createdAt);
       if (!isNaN(c.getTime())) {
         const cMonth = c.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
         if (targetMonth && targetYear && cMonth.includes(targetMonth) && cMonth.includes(targetYear)) return true;
+        if (targetMonth && !targetYear && cMonth.includes(targetMonth)) return true;
       }
     }
 
@@ -969,7 +955,6 @@ export async function payInvoice(
 
   const currentBalance = inv.grandTotal - (inv.paidAmount || 0);
   const amountToApplyToCurrent = Math.min(paymentData.amount, currentBalance);
-  let excessAmount = paymentData.amount - amountToApplyToCurrent;
 
   const newPaid = (inv.paidAmount || 0) + amountToApplyToCurrent;
   const isFullyPaid = newPaid >= inv.grandTotal;
@@ -1032,61 +1017,7 @@ export async function payInvoice(
     }
   }
 
-  // Handle excess payment by applying to older invoices
-  if (excessAmount > 0) {
-    try {
-      const q = query(collection(db, 'invoices'), where('studentId', '==', inv.studentId));
-      const studentInvoicesSnap = await getDocs(q);
-
-      const olderInvoices = studentInvoicesSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Invoice))
-        .filter(i => {
-          if (i.id === inv.id) return false;
-          const status = parseInvoiceStatus(i);
-          return (status !== 'paid' && status !== 'cancelled') && new Date(i.createdAt).getTime() < new Date(inv.createdAt).getTime();
-        })
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-
-      for (const olderInv of olderInvoices) {
-        if (excessAmount <= 0) break;
-
-        const olderBalance = (olderInv.grandTotal || 0) - (olderInv.paidAmount || 0);
-        if (olderBalance > 0) {
-          const applyToOlder = Math.min(excessAmount, olderBalance);
-          excessAmount -= applyToOlder;
-
-          const newOlderPaid = (olderInv.paidAmount || 0) + applyToOlder;
-          const isOlderFullyPaid = newOlderPaid >= olderInv.grandTotal;
-
-          await updateDoc(doc(db, 'invoices', olderInv.id), {
-            paidAmount: newOlderPaid,
-            status: isOlderFullyPaid ? 'paid' : 'sent',
-            ...(isOlderFullyPaid ? { paidAt: serverTimestamp() } : {}),
-            updatedAt: serverTimestamp(),
-          });
-
-          if (olderInv.feeIds && olderInv.feeIds.length > 0) {
-            for (const olderFeeId of olderInv.feeIds) {
-              const receipt = generateReceiptNumber();
-              await updateDoc(doc(db, 'fees', olderFeeId), {
-                paidAmount: newOlderPaid,
-                status: isOlderFullyPaid ? 'paid' : 'partial',
-                paidDate: now.toISOString().split('T')[0],
-                paymentMethod: paymentData.method,
-                receiptNumber: receipt,
-                collectedBy: paymentData.collectorId,
-                collectedByName: paymentData.collectorName,
-                updatedAt: serverTimestamp(),
-              });
-            }
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Error applying excess amount to older invoices', e);
-    }
-  }
-
+  // Note: Monthly isolation — payment stays strictly with this specific invoice and its linked fees.
   return { ...inv, paidAmount: newPaid, status: isFullyPaid ? 'paid' : 'sent' };
 }
 
@@ -1154,6 +1085,24 @@ export async function syncMissingInvoices(): Promise<{ success: number; errors: 
 
     if (!hasInvoice) {
       try {
+        // Guard against duplicate invoices: If student already has an invoice for this month, link to it instead!
+        if (fee.studentId && fee.month) {
+          const studentInvoices = await getInvoicesByStudent(fee.studentId);
+          const feeMonthLower = (fee.month || '').toLowerCase().trim();
+          const existingInv = studentInvoices.find(i => (i.month || '').toLowerCase().trim() === feeMonthLower);
+          if (existingInv) {
+            await updateDoc(doc(db, 'fees', fee.id), { invoiceId: existingInv.id });
+            const currentFeeIds = existingInv.feeIds || [];
+            if (!currentFeeIds.includes(fee.id)) {
+              await updateDoc(doc(db, 'invoices', existingInv.id), {
+                feeIds: [...currentFeeIds, fee.id],
+                updatedAt: serverTimestamp(),
+              });
+            }
+            continue;
+          }
+        }
+
         let category = 'school';
         try {
           const studentSnap = await getDoc(doc(db, 'students', fee.studentId));
@@ -1233,17 +1182,26 @@ export async function deleteInvoice(id: string): Promise<void> {
   await deleteDoc(doc(db, 'invoices', id));
 }
 
-export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; deletedInvoices: number; syncedFees: number }> {
+export async function cleanupDuplicateFees(targetMonth?: string): Promise<{ deletedFees: number; deletedInvoices: number; syncedFees: number }> {
+  // If targetMonth is provided or defaults to November 2026, run monthly invoice deduplication
+  if (targetMonth) {
+    const res = await cleanupDuplicateInvoicesForMonth(targetMonth);
+    return {
+      deletedFees: res.deletedFees,
+      deletedInvoices: res.deletedInvoices,
+      syncedFees: res.remainingInvoices,
+    };
+  }
+
   // 1. Fetch all fees
   const feesSnap = await getDocs(collection(db, 'fees'));
   const allFees = feesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
-  // 2. Group by studentId + month + feeType to ONLY dedupe identical duplicate runs
+  // 2. Group by studentId + month to deduplicate
   const groupedFees: Record<string, any[]> = {};
   for (const fee of allFees) {
     const mKey = (fee.month || 'unspecified').trim().toLowerCase();
-    const tKey = (fee.feeType || fee.description || 'fee').trim().toLowerCase();
-    const key = `${fee.studentId}_${mKey}_${tKey}`; 
+    const key = `${fee.studentId}_${mKey}`; 
     if (!groupedFees[key]) groupedFees[key] = [];
     groupedFees[key].push(fee);
   }
@@ -1255,8 +1213,6 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
   for (const key in groupedFees) {
     const group = groupedFees[key];
     if (group.length > 1) {
-      // Sort to find the "best" fee to keep
-      // Priority: 1. Is Paid/Partial? 2. Has invoiceId? 3. Most recently updated
       group.sort((a, b) => {
         const aPaid = (a.status === 'paid' || a.status === 'partial') ? 1 : 0;
         const bPaid = (b.status === 'paid' || b.status === 'partial') ? 1 : 0;
@@ -1275,11 +1231,9 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
       const duplicates = group.slice(1);
 
       for (const dup of duplicates) {
-        // Delete the duplicate fee
         await deleteDoc(doc(db, 'fees', dup.id));
         deletedFees++;
 
-        // If it had a distinct invoice, delete that too (unless it's shared)
         if (dup.invoiceId && dup.invoiceId !== bestFee.invoiceId) {
           try {
             await deleteDoc(doc(db, 'invoices', dup.invoiceId));
@@ -1288,15 +1242,13 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
         }
       }
       
-      // SYNC SOURCE OF TRUTH: Ensure the kept fee's paid amount matches its invoice exactly
       if (bestFee.invoiceId) {
         try {
           const invSnap = await getDoc(doc(db, 'invoices', bestFee.invoiceId));
           if (invSnap.exists()) {
             const invData = invSnap.data();
-            const correctMonth = invData.month || bestFee.month || 'October 2026';
+            const correctMonth = invData.month || bestFee.month || 'November 2026';
             
-            // Fix invoice month if it's missing
             if (!invData.month) {
               await updateDoc(doc(db, 'invoices', bestFee.invoiceId), { month: correctMonth });
             }
@@ -1312,36 +1264,272 @@ export async function cleanupDuplicateFees(): Promise<{ deletedFees: number; del
           }
         } catch(e) {}
       }
-    } else if (group.length === 1) {
-      // Even if not a duplicate, sync its paid amount from invoice to fix the Rs 3000 vs 1500 mismatch!
-      const singleFee = group[0];
-      if (singleFee.invoiceId) {
-        try {
-          const invSnap = await getDoc(doc(db, 'invoices', singleFee.invoiceId));
-          if (invSnap.exists()) {
-            const invData = invSnap.data();
-            const correctMonth = invData.month || singleFee.month || 'October 2026';
-
-            // Fix invoice month if it's missing
-            if (!invData.month) {
-              await updateDoc(doc(db, 'invoices', singleFee.invoiceId), { month: correctMonth });
-            }
-
-            if (singleFee.paidAmount !== invData.paidAmount || singleFee.status !== invData.status || !singleFee.month) {
-              await updateDoc(doc(db, 'fees', singleFee.id), {
-                paidAmount: invData.paidAmount || 0,
-                status: invData.status || 'pending',
-                month: correctMonth
-              });
-              syncedFees++;
-            }
-          }
-        } catch(e) {}
-      }
     }
   }
 
   return { deletedFees, deletedInvoices, syncedFees };
+}
+
+export async function cleanupDuplicateInvoicesForMonth(monthLabel: string = 'November 2026'): Promise<{
+  deletedInvoices: number;
+  deletedFees: number;
+  remainingInvoices: number;
+  totalActiveStudents: number;
+}> {
+  const normTarget = monthLabel.trim();
+  const lowerLabel = normTarget.toLowerCase();
+  const parts = lowerLabel.split(' ');
+  const targetMonthName = parts[0] || '';
+  const targetYear = parts[1] || '';
+
+  // 1. Fetch active students
+  const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
+  const activeStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+  const activeStudentMap = new Map<string, Student>();
+  activeStudents.forEach(s => activeStudentMap.set(s.id, s));
+
+  // 2. Fetch all invoices
+  const allInvoices = await getInvoices();
+
+  // 3. Filter invoices for target month
+  const monthInvoices = allInvoices.filter(inv => {
+    const invMonth = (inv.month || '').toLowerCase().trim();
+    if (invMonth) {
+      if (invMonth === lowerLabel) return true;
+      if (targetMonthName && targetYear && invMonth.includes(targetMonthName) && invMonth.includes(targetYear)) return true;
+      if (targetMonthName && !targetYear && invMonth.includes(targetMonthName)) return true;
+      return false;
+    }
+    if (inv.dueDate) {
+      const d = new Date(inv.dueDate);
+      if (!isNaN(d.getTime())) {
+        const dMonth = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonthName && targetYear && dMonth.includes(targetMonthName) && dMonth.includes(targetYear)) return true;
+      }
+    }
+    if (inv.createdAt) {
+      const c = new Date(inv.createdAt);
+      if (!isNaN(c.getTime())) {
+        const cMonth = c.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        if (targetMonthName && targetYear && cMonth.includes(targetMonthName) && cMonth.includes(targetYear)) return true;
+      }
+    }
+    return false;
+  });
+
+  // 4. Group by studentId
+  const invoicesByStudent = new Map<string, Invoice[]>();
+  const orphanInvoices: Invoice[] = [];
+
+  for (const inv of monthInvoices) {
+    if (!inv.studentId || !activeStudentMap.has(inv.studentId)) {
+      orphanInvoices.push(inv);
+    } else {
+      const list = invoicesByStudent.get(inv.studentId) || [];
+      list.push(inv);
+      invoicesByStudent.set(inv.studentId, list);
+    }
+  }
+
+  let deletedInvoicesCount = 0;
+  let deletedFeesCount = 0;
+  const keptInvoices: Invoice[] = [];
+
+  // 5. For each active student, keep 1 best invoice and delete duplicate invoices
+  for (const [, studentInvs] of invoicesByStudent.entries()) {
+    studentInvs.sort((a, b) => {
+      const aPaid = a.status === 'paid' ? 2 : (a.paidAmount || 0) > 0 ? 1 : 0;
+      const bPaid = b.status === 'paid' ? 2 : (b.paidAmount || 0) > 0 ? 1 : 0;
+      if (aPaid !== bPaid) return bPaid - aPaid;
+
+      const aItems = a.items?.length || 0;
+      const bItems = b.items?.length || 0;
+      if (aItems !== bItems) return bItems - aItems;
+
+      const aDate = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bDate = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bDate - aDate;
+    });
+
+    const kept = studentInvs[0];
+    const dups = studentInvs.slice(1);
+    keptInvoices.push(kept);
+
+    // Normalize kept invoice month
+    if (kept.month !== normTarget) {
+      try {
+        await updateDoc(doc(db, 'invoices', kept.id), {
+          month: normTarget,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Failed to update invoice month:', err);
+      }
+    }
+
+    // Delete duplicates
+    for (const dup of dups) {
+      try {
+        await deleteDoc(doc(db, 'invoices', dup.id));
+        deletedInvoicesCount++;
+      } catch (err) {
+        console.warn('Failed to delete duplicate invoice:', err);
+      }
+
+      if (dup.feeIds && dup.feeIds.length > 0) {
+        for (const feeId of dup.feeIds) {
+          try {
+            await deleteDoc(doc(db, 'fees', feeId));
+            deletedFeesCount++;
+          } catch (e) {}
+        }
+      }
+    }
+  }
+
+  // 6. Delete orphan/invalid invoices for this month
+  for (const orphan of orphanInvoices) {
+    try {
+      await deleteDoc(doc(db, 'invoices', orphan.id));
+      deletedInvoicesCount++;
+      if (orphan.feeIds && orphan.feeIds.length > 0) {
+        for (const fId of orphan.feeIds) {
+          try {
+            await deleteDoc(doc(db, 'fees', fId));
+            deletedFeesCount++;
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 7. Cleanup duplicate fees in fees collection for this month
+  const feesSnap = await getDocs(collection(db, 'fees'));
+  const monthFees = feesSnap.docs
+    .map(d => ({ id: d.id, ...d.data() } as any))
+    .filter(f => {
+      const m = (f.month || '').toLowerCase().trim();
+      return m === lowerLabel || (targetMonthName && targetYear && m.includes(targetMonthName) && m.includes(targetYear));
+    });
+
+  const feesByStudent = new Map<string, any[]>();
+  for (const f of monthFees) {
+    const list = feesByStudent.get(f.studentId) || [];
+    list.push(f);
+    feesByStudent.set(f.studentId, list);
+  }
+
+  for (const [studentId, sFees] of feesByStudent.entries()) {
+    if (sFees.length > 1) {
+      const matchingKept = keptInvoices.find(k => k.studentId === studentId);
+      const keptFeeId = matchingKept?.feeIds?.[0];
+
+      sFees.sort((a, b) => {
+        if (keptFeeId && a.id === keptFeeId) return -1;
+        if (keptFeeId && b.id === keptFeeId) return 1;
+        const aPaid = a.status === 'paid' ? 1 : 0;
+        const bPaid = b.status === 'paid' ? 1 : 0;
+        return bPaid - aPaid;
+      });
+
+      const dups = sFees.slice(1);
+      for (const dFee of dups) {
+        try {
+          await deleteDoc(doc(db, 'fees', dFee.id));
+          deletedFeesCount++;
+        } catch (e) {}
+      }
+    }
+  }
+
+  // 8. If any active student is missing an invoice for this month, generate their single invoice
+  const billedStudentIds = new Set(keptInvoices.map(k => k.studentId));
+  const missingStudents = activeStudents.filter(s => !billedStudentIds.has(s.id));
+  
+  if (missingStudents.length > 0) {
+    const reservedNumbers = await reserveInvoiceNumbers(missingStudents.length);
+    for (let i = 0; i < missingStudents.length; i++) {
+      const stud = missingStudents[i];
+      const invNum = reservedNumbers[i];
+      const feeId = 'fee-' + Math.random().toString(36).substring(2, 9);
+      const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
+      const defaultAmt = getDefaultTuitionForClass(stud.className);
+      const dueDate = getMonthDueDate(10, normTarget);
+
+      const feeDoc = {
+        id: feeId,
+        studentId: stud.id,
+        studentName: `${stud.firstName} ${stud.lastName}`,
+        className: stud.className,
+        section: stud.section,
+        feeType: 'tuition',
+        description: `Monthly Tuition Fee — ${normTarget}`,
+        amount: defaultAmt,
+        dueDate,
+        paidAmount: 0,
+        status: 'pending',
+        month: normTarget,
+        invoiceId: invId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      const invDoc = {
+        id: invId,
+        invoiceNumber: invNum,
+        studentId: stud.id,
+        studentName: `${stud.firstName} ${stud.lastName}`,
+        className: stud.className,
+        section: stud.section,
+        items: [{
+          id: 'item-1',
+          description: `Monthly Tuition Fee — ${normTarget}`,
+          quantity: 1,
+          unitPrice: defaultAmt,
+          total: defaultAmt,
+        }],
+        subtotal: defaultAmt,
+        discount: 0,
+        discountType: 'fixed',
+        tax: 0,
+        grandTotal: defaultAmt,
+        paidAmount: 0,
+        status: 'sent',
+        dueDate,
+        month: normTarget,
+        category: stud.category || 'school',
+        feeIds: [feeId],
+        notes: `Due by ${dueDate ? new Date(dueDate).toLocaleDateString('en-PK', { day: 'numeric', month: 'long', year: 'numeric' }) : 'the due date'}.`,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      try {
+        await setDoc(doc(db, 'fees', feeId), feeDoc);
+        await setDoc(doc(db, 'invoices', invId), invDoc);
+      } catch (err) {
+        console.warn('Failed to create missing invoice for student:', stud.id, err);
+      }
+    }
+  }
+
+  const finalInvoices = await getInvoicesByMonth(normTarget);
+
+  return {
+    deletedInvoices: deletedInvoicesCount,
+    deletedFees: deletedFeesCount,
+    remainingInvoices: finalInvoices.length,
+    totalActiveStudents: activeStudents.length,
+  };
+}
+
+export async function cleanupNovemberInvoices(): Promise<{
+  deletedInvoices: number;
+  deletedFees: number;
+  remainingInvoices: number;
+  totalActiveStudents: number;
+}> {
+  return cleanupDuplicateInvoicesForMonth('November 2026');
 }
 
 // ── Direct Academy Fee Payment ───────────────────────────────────────────────

@@ -64,10 +64,10 @@ export default function AcademyStudentsPage() {
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
   const [receiptData, setReceiptData] = useState<{ invoice: Invoice; student: Student; fees: Fee[] } | null>(null);
 
-  // Analysis Filter State
+  // Analysis Filter State — strictly monthly by default
   const currentMonthLabel = useMemo(() => getCurrentMonthLabel(), []);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthLabel);
-  const [showAllMonths, setShowAllMonths] = useState<boolean>(true);
+  const [showAllMonths, setShowAllMonths] = useState<boolean>(false);
 
   // Split selectedMonth for UI
   const [monthPart, yearPart] = selectedMonth ? selectedMonth.split(' ') : getCurrentMonthLabel().split(' ');
@@ -518,17 +518,12 @@ export default function AcademyStudentsPage() {
               <div className="relative">
                 <select
                   className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
-                  value={showAllMonths ? 'all' : monthPart}
+                  value={monthPart}
                   onChange={(e) => {
-                    if (e.target.value === 'all') {
-                      setShowAllMonths(true);
-                    } else {
-                      setSelectedMonth(`${e.target.value} ${yearPart}`);
-                      setShowAllMonths(false);
-                    }
+                    setSelectedMonth(`${e.target.value} ${yearPart}`);
+                    setShowAllMonths(false);
                   }}
                 >
-                  <option value="all">All Months</option>
                   {MONTHS.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -537,8 +532,7 @@ export default function AcademyStudentsPage() {
               </div>
               <div className="relative">
                 <select
-                  disabled={showAllMonths}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10 disabled:opacity-50"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-semibold shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 appearance-none cursor-pointer pr-10"
                   value={yearPart}
                   onChange={(e) => {
                     setSelectedMonth(`${monthPart} ${e.target.value}`);

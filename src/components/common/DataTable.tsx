@@ -20,6 +20,8 @@ export interface Column<T> {
   sortable?: boolean;
   cell?: (item: T) => React.ReactNode;
   align?: 'left' | 'center' | 'right';
+  className?: string;
+  width?: string | number;
 }
 
 interface DataTableProps<T> {
@@ -137,12 +139,14 @@ export function DataTable<T extends Record<string, any>>({
                 {columns.map((column) => (
                   <th
                     key={column.key}
+                    style={column.width ? { width: column.width, minWidth: column.width } : undefined}
                     onClick={() => column.sortable && handleSort(column.key)}
                     className={cn(
-                      'px-6 py-4.5 font-semibold text-[hsl(var(--muted-foreground))] select-none',
+                      'px-4 py-3.5 font-semibold text-[hsl(var(--muted-foreground))] select-none text-xs sm:text-sm',
                       column.sortable && 'cursor-pointer hover:text-[hsl(var(--foreground))] transition-colors',
                       column.align === 'center' && 'text-center',
-                      column.align === 'right' && 'text-right'
+                      column.align === 'right' && 'text-right',
+                      column.className
                     )}
                   >
                     <div
@@ -171,10 +175,12 @@ export function DataTable<T extends Record<string, any>>({
                     {columns.map((column) => (
                       <td
                         key={column.key}
+                        style={column.width ? { width: column.width, minWidth: column.width } : undefined}
                         className={cn(
-                          'px-6 py-4.5 text-[hsl(var(--foreground))] font-medium whitespace-nowrap',
+                          'px-4 py-3 text-[hsl(var(--foreground))] font-medium whitespace-nowrap text-xs sm:text-sm',
                           column.align === 'center' && 'text-center',
-                          column.align === 'right' && 'text-right'
+                          column.align === 'right' && 'text-right',
+                          column.className
                         )}
                       >
                         {column.cell ? column.cell(item) : item[column.key]}

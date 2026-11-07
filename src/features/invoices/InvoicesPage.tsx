@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
-  getStudentArrears, syncMissingInvoices, deleteInvoice, cleanupDuplicateFees
+  getStudentArrears, syncMissingInvoices, deleteInvoice,
+  cleanupDuplicateInvoicesForMonth, cleanupNovemberInvoices
 } from '@/features/fees/feeService';
 import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
@@ -74,11 +75,11 @@ export default function InvoicesPage() {
   const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filters
+  // Filters — strictly monthly by default
   const [classFilter, setClassFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [showAllMonths, setShowAllMonths] = useState(true);
+  const [showAllMonths, setShowAllMonths] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonthLabel());
 
   // Split month filter for UI
@@ -97,17 +98,6 @@ export default function InvoicesPage() {
   }, [showAllMonths, selectedMonth]);
 
   useEffect(() => { loadInvoices(); }, [loadInvoices]);
-
-  // Auto-run sync on mount to ensure all past fees have invoices with correct statuses
-  useEffect(() => {
-    import('@/features/fees/feeService').then(({ syncMissingInvoices }) => {
-      syncMissingInvoices().then((res) => {
-        if (res.success > 0) {
-          loadInvoices();
-        }
-      });
-    });
-  }, [loadInvoices]);
 
   const handlePreviewClick = (inv: Invoice) => {
     setSelectedInvoice(inv);
@@ -284,12 +274,12 @@ export default function InvoicesPage() {
   const handleGenerateMonthlyFees = async () => {
     setIsSubmitting(true);
     try {
-      const targetMonth = showAllMonths ? undefined : selectedMonth;
+      const targetMonth = selectedMonth;
       const result = await generateMonthlyFeesForAll(targetMonth);
       if (result.success === 0 && result.skipped === 0 && result.missingTemplates === 0) {
-        toast.info('No active students found to generate fees for.');
+        toast.info(`No unbilled students found for ${targetMonth}.`);
       } else {
-        let msg = `Monthly fees generated for ${targetMonth || 'current month'}: ${result.success} new.`;
+        let msg = `Monthly fees generated for ${targetMonth}: ${result.success} new.`;
         if (result.skipped > 0) msg += ` ${result.skipped} already billed.`;
         if (result.missingTemplates > 0) {
           msg += ` WARNING: ${result.missingTemplates} students skipped (No Fee Template configured for their class!).`;
@@ -324,14 +314,32 @@ export default function InvoicesPage() {
   };
 
   const handleCleanupDuplicates = async () => {
-    if (!window.confirm('This will find and delete duplicate fees/invoices. Are you sure?')) return;
+    if (!window.confirm(`Clean up duplicate invoices for ${showAllMonths ? 'all months' : selectedMonth}? Each student will have exactly 1 invoice.`)) return;
     setIsSubmitting(true);
     try {
-      const res = await cleanupDuplicateFees();
-      toast.success(`Cleaned up ${res.deletedFees} duplicate fees and ${res.deletedInvoices} invoices.`);
+      const res = await cleanupDuplicateInvoicesForMonth(selectedMonth);
+      toast.success(`Cleanup complete: Removed ${res.deletedInvoices} duplicate invoices. Exactly ${res.remainingInvoices} invoices remain for ${selectedMonth}.`);
       loadInvoices();
     } catch (e) {
+      console.error(e);
       toast.error('Failed to cleanup duplicates.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeduplicateNovember = async () => {
+    if (!window.confirm('Deduplicate November 2026 invoices down to exactly 147 invoices (1 per active student)?')) return;
+    setIsSubmitting(true);
+    try {
+      const res = await cleanupNovemberInvoices();
+      setSelectedMonth('November 2026');
+      setShowAllMonths(false);
+      toast.success(`November deduplication successful: Removed ${res.deletedInvoices} duplicates. Exactly ${res.remainingInvoices} invoices remain for November 2026.`);
+      loadInvoices();
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to deduplicate November invoices.');
     } finally {
       setIsSubmitting(false);
     }
@@ -360,17 +368,19 @@ export default function InvoicesPage() {
       key: 'invoiceNumber',
       header: 'Invoice No',
       sortable: true,
+      width: '125px',
       cell: (item) => (
-        <span className="font-bold text-blue-600 text-sm">{item.invoiceNumber}</span>
+        <span className="font-bold text-blue-600 text-sm whitespace-nowrap">{item.invoiceNumber}</span>
       ),
     },
     {
       key: 'studentName',
       header: 'Student',
       sortable: true,
+      width: '180px',
       cell: (item) => (
-        <div>
-          <div className="font-semibold text-slate-800 text-sm">{item.studentName}</div>
+        <div className="min-w-[140px]">
+          <div className="font-semibold text-slate-800 text-sm truncate">{item.studentName}</div>
           <div className="text-[11px] text-slate-400">
             {item.className} — Sec {item.section}
             <span className="ml-1.5 px-1 py-0.25 bg-slate-100 text-slate-600 text-[9px] rounded font-medium capitalize">
@@ -384,8 +394,9 @@ export default function InvoicesPage() {
       key: 'month',
       header: 'Month',
       sortable: true,
+      width: '120px',
       cell: (item) => (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 whitespace-nowrap">
           {item.month || (item.createdAt ? formatDate(item.createdAt) : '—')}
         </span>
       ),
@@ -394,13 +405,17 @@ export default function InvoicesPage() {
       key: 'grandTotal',
       header: 'Total Bill',
       sortable: true,
-      cell: (item) => <span className="font-semibold text-slate-800">{formatCurrency(item.grandTotal)}</span>,
+      align: 'right',
+      width: '110px',
+      cell: (item) => <span className="font-semibold text-slate-800 whitespace-nowrap">{formatCurrency(item.grandTotal)}</span>,
     },
     {
       key: 'paidAmount',
       header: 'Paid',
+      align: 'right',
+      width: '95px',
       cell: (item) => (
-        <span className={(item.paidAmount || 0) > 0 ? 'text-emerald-600 font-semibold' : 'text-slate-400'}>
+        <span className={(item.paidAmount || 0) > 0 ? 'text-emerald-600 font-semibold whitespace-nowrap' : 'text-slate-400 whitespace-nowrap'}>
           {formatCurrency(item.paidAmount || 0)}
         </span>
       ),
@@ -408,10 +423,12 @@ export default function InvoicesPage() {
     {
       key: 'remaining',
       header: 'Remaining',
+      align: 'right',
+      width: '110px',
       cell: (item) => {
         const rem = item.grandTotal - (item.paidAmount || 0);
         return (
-          <span className={rem > 0 ? 'text-red-600 font-bold' : 'text-emerald-600 font-semibold'}>
+          <span className={rem > 0 ? 'text-red-600 font-bold whitespace-nowrap' : 'text-emerald-600 font-semibold whitespace-nowrap'}>
             {rem > 0 ? formatCurrency(rem) : '—'}
           </span>
         );
@@ -420,25 +437,29 @@ export default function InvoicesPage() {
     {
       key: 'dueDate',
       header: 'Due Date',
-      cell: (item) => <span className="text-sm text-slate-600">{formatDate(item.dueDate)}</span>,
+      width: '105px',
+      cell: (item) => <span className="text-xs text-slate-600 whitespace-nowrap">{formatDate(item.dueDate)}</span>,
     },
     {
       key: 'status',
       header: 'Status',
       sortable: true,
+      align: 'center',
+      width: '95px',
       cell: (item) => getStatusBadge(item.status),
     },
     {
       key: 'actions',
       header: 'Actions',
       align: 'right',
+      width: '280px',
       cell: (item) => (
-        <div className="flex gap-1.5 justify-end flex-wrap">
+        <div className="flex items-center gap-1.5 justify-end whitespace-nowrap">
           {/* View Details */}
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50"
+            className="h-8 w-8 shrink-0 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50"
             onClick={() => handlePreviewClick(item)}
             title="View Invoice Details"
           >
@@ -450,7 +471,7 @@ export default function InvoicesPage() {
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
+              className="h-8 w-8 shrink-0 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50"
               onClick={() => setInventoryModalInvoice(item)}
               title="Add Inventory (Books, Uniforms, Stationery)"
             >
@@ -462,7 +483,7 @@ export default function InvoicesPage() {
           <Button
             size="sm"
             variant="outline"
-            className="h-8 gap-1.5 text-xs text-indigo-700 border-indigo-300 hover:bg-indigo-600 hover:text-white font-semibold"
+            className="h-8 px-2 gap-1 text-xs text-indigo-700 border-indigo-200 hover:bg-indigo-600 hover:text-white font-semibold shrink-0"
             onClick={() => handleChallanClick(item)}
             title="Print Fee Challan (Student / Accounts / Office)"
             disabled={loadingChallanId !== null}
@@ -476,7 +497,7 @@ export default function InvoicesPage() {
             <Button
               size="sm"
               onClick={() => handlePayClick(item)}
-              className="h-8 gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white"
+              className="h-8 px-2.5 gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold shrink-0"
             >
               <CreditCard className="h-3.5 w-3.5" />
               Pay
@@ -486,7 +507,7 @@ export default function InvoicesPage() {
             <Button
               size="sm"
               onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
-              className="h-8 gap-1.5 text-xs bg-green-500 hover:bg-green-600 text-white"
+              className="h-8 px-2.5 gap-1 text-xs bg-green-500 hover:bg-green-600 text-white font-semibold shrink-0"
               title="Send WhatsApp Alert"
             >
               <MessageCircle className="h-3.5 w-3.5" />
@@ -498,7 +519,7 @@ export default function InvoicesPage() {
               size="sm"
               variant="outline"
               onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
-              className="h-8 gap-1.5 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+              className="h-8 px-2.5 gap-1 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 font-semibold shrink-0"
               title="Resend WhatsApp Alert"
             >
               <MessageCircle className="h-3.5 w-3.5" />
@@ -506,7 +527,7 @@ export default function InvoicesPage() {
             </Button>
           )}
           {item.status === 'paid' && (
-            <span className="flex items-center gap-1 text-xs text-emerald-600 font-semibold px-2 py-1 bg-emerald-50 rounded-lg">
+            <span className="flex items-center gap-1 text-xs text-emerald-600 font-semibold px-2 py-1 bg-emerald-50 rounded-lg shrink-0">
               <CheckCircle2 className="h-3.5 w-3.5" />
               Paid
             </span>
@@ -516,7 +537,7 @@ export default function InvoicesPage() {
             <Button
               size="icon"
               variant="ghost"
-              className="h-8 w-8 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50"
+              className="h-8 w-8 shrink-0 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50"
               onClick={() => handleDeleteInvoice(item)}
               title="Delete Invoice"
             >
@@ -863,27 +884,22 @@ export default function InvoicesPage() {
 
             {/* Controls */}
             <div className="flex flex-wrap gap-2.5 items-center">
-              {/* Month toggle */}
-              <div className="flex gap-2">
+              {/* Month selector */}
+              <div className="flex gap-1.5 items-center">
                 <div className="relative">
                   <select
-                    value={showAllMonths ? 'all' : monthPart}
+                    value={monthPart}
                     onChange={(e) => {
-                      if (e.target.value === 'all') {
-                        setShowAllMonths(true);
-                      } else {
-                        setSelectedMonth(`${e.target.value} ${yearPart}`);
-                        setShowAllMonths(false);
-                      }
+                      setSelectedMonth(`${e.target.value} ${yearPart}`);
+                      setShowAllMonths(false);
                     }}
-                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
+                    className="h-10 pl-3 pr-8 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
                   >
-                    <option value="all">All Months</option>
                     {MONTHS.map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
                 </div>
                 <div className="relative">
                   <select
@@ -892,14 +908,13 @@ export default function InvoicesPage() {
                       setSelectedMonth(`${monthPart} ${e.target.value}`);
                       setShowAllMonths(false);
                     }}
-                    disabled={showAllMonths}
-                    className="h-10 pl-4 pr-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm disabled:opacity-50"
+                    className="h-10 pl-3 pr-8 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer shadow-sm"
                   >
                     {YEARS.map((y) => (
                       <option key={y} value={y}>{y}</option>
                     ))}
                   </select>
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▼</span>
+                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">▾</span>
                 </div>
               </div>
 
@@ -909,8 +924,9 @@ export default function InvoicesPage() {
                 onClick={() => setShowAllMonths(!showAllMonths)}
                 className={`h-10 gap-1.5 text-xs font-semibold rounded-xl ${showAllMonths ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700'
                   }`}
+                title="Toggle between single month view and all-time combined view"
               >
-                {showAllMonths ? '✓ Showing All' : 'Show All Time'}
+                {showAllMonths ? '✓ Showing All Time' : 'Show All Time'}
               </Button>
 
               <div className="relative">
@@ -967,10 +983,19 @@ export default function InvoicesPage() {
                     onClick={handleCleanupDuplicates}
                     disabled={isSubmitting || isLoading}
                     variant="outline"
-                    className="h-10 text-xs gap-1 border-red-200 text-red-700 hover:bg-red-50"
-                    title="Cleanup duplicate fees and invoices"
+                    className="h-10 text-xs gap-1 border-slate-300 text-slate-700 hover:bg-slate-50 font-semibold"
+                    title={`Cleanup duplicate invoices for ${selectedMonth}`}
                   >
                     Cleanup Duplicates
+                  </Button>
+                  <Button
+                    onClick={handleDeduplicateNovember}
+                    disabled={isSubmitting || isLoading}
+                    className="h-10 text-xs gap-1.5 bg-red-600 hover:bg-red-700 text-white shadow-sm font-semibold"
+                    title="Deduplicate November 2026 invoices down to exactly 147 (1 per student)"
+                  >
+                    {isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <span>🧹</span>}
+                    Deduplicate Nov (147 Target)
                   </Button>
                 </>
               )}
@@ -980,9 +1005,10 @@ export default function InvoicesPage() {
                 onClick={handleGenerateMonthlyFees}
                 disabled={isSubmitting || isLoading}
                 className="h-10 gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow"
+                title={`Generate monthly fee invoices for ${selectedMonth}`}
               >
                 {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                Generate Monthly Fees
+                Generate Fees ({selectedMonth})
               </Button>
             </div>
           </div>
