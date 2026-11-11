@@ -933,21 +933,14 @@ export default function InvoicesPage() {
       {/* Table */}
       <Card className="border border-slate-200 shadow-sm overflow-hidden">
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="flex flex-col items-center gap-3">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-                <span className="text-sm text-slate-500">Loading invoices...</span>
-              </div>
-            </div>
-          ) : (
-            <DataTable
-              data={filteredInvoices}
-              columns={columns}
-              searchField="studentName"
-              searchPlaceholder="Search invoices by student name..."
-            />
-          )}
+          <DataTable
+            data={filteredInvoices}
+            columns={columns}
+            searchField="studentName"
+            searchPlaceholder="Search invoices by student name..."
+            paginationKey="invoices"
+            isLoading={isLoading}
+          />
         </CardContent>
       </Card>
     </div>

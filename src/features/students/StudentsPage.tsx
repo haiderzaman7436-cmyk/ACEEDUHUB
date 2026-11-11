@@ -298,6 +298,7 @@ export default function StudentsPage() {
         columns={columns}
         searchField="firstName"
         searchPlaceholder="Search students by name..."
+        paginationKey="students"
         filterComponent={
           <select
             value={classFilter}

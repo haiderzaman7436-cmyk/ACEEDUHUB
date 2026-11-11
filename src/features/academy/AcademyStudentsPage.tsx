@@ -486,6 +486,8 @@ export default function AcademyStudentsPage() {
                 columns={studentColumns}
                 searchField="firstName"
                 searchPlaceholder="Search academy students..."
+                paginationKey="academy_students"
+                isLoading={isLoading}
               />
             )}
           </Card>
@@ -645,6 +647,8 @@ export default function AcademyStudentsPage() {
                     columns={transactionColumns}
                     searchField="studentName"
                     searchPlaceholder="Search student name..."
+                    paginationKey="academy_transactions"
+                    isLoading={isLoading}
                   />
                 )}
               </div>

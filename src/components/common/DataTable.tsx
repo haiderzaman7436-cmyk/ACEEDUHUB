@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -7,6 +7,7 @@ import {
   ArrowUpDown,
   Search,
   SlidersHorizontal,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +31,9 @@ interface DataTableProps<T> {
   searchPlaceholder?: string;
   searchField?: keyof T;
   filterComponent?: React.ReactNode;
+  paginationKey?: string;
+  defaultPageSize?: number;
+  isLoading?: boolean;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -38,12 +42,57 @@ export function DataTable<T extends Record<string, any>>({
   searchPlaceholder = 'Search records...',
   searchField,
   filterComponent,
+  paginationKey,
+  defaultPageSize,
+  isLoading = false,
 }: DataTableProps<T>) {
+  const storageKey = paginationKey ? `ace_dt_${paginationKey}` : 'ace_dt_default';
+
+  // Persist Page Size across reloads/renders so user choice (e.g. 100 rows) is never lost
+  const [pageSize, setPageSizeState] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(`${storageKey}_pageSize`) || localStorage.getItem('ace_dt_pageSize');
+      if (saved) {
+        const parsed = Number(saved);
+        if ([10, 20, 25, 50, 55, 100, 200].includes(parsed)) return parsed;
+      }
+    } catch {}
+    return defaultPageSize || 10;
+  });
+
+  // Persist Current Page in sessionStorage so paying a fee doesn't kick user back to page 1
+  const [currentPage, setCurrentPageState] = useState<number>(() => {
+    try {
+      const saved = sessionStorage.getItem(`${storageKey}_page`);
+      if (saved) {
+        const parsed = Number(saved);
+        if (parsed >= 1) return parsed;
+      }
+    } catch {}
+    return 1;
+  });
+
+  const setPageSize = (size: number) => {
+    setPageSizeState(size);
+    try {
+      localStorage.setItem(`${storageKey}_pageSize`, String(size));
+      localStorage.setItem('ace_dt_pageSize', String(size));
+    } catch {}
+  };
+
+  const setCurrentPage = (page: number | ((prev: number) => number)) => {
+    setCurrentPageState((prev) => {
+      const next = typeof page === 'function' ? page(prev) : page;
+      try {
+        sessionStorage.setItem(`${storageKey}_page`, String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   // States
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
 
   // Handle Sort
   const handleSort = (key: string) => {
@@ -94,13 +143,20 @@ export function DataTable<T extends Record<string, any>>({
   }, [sortedData, currentPage, pageSize]);
 
   // Adjust page if filter results contract page limit
-  useMemo(() => {
-    if (currentPage > totalPages) {
+  useEffect(() => {
+    if (totalPages > 0 && currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
   }, [totalPages, currentPage]);
 
-  const startIdx = (currentPage - 1) * pageSize + 1;
+  // Reset to page 1 only when user enters a new search term
+  useEffect(() => {
+    if (searchTerm) {
+      setCurrentPage(1);
+    }
+  }, [searchTerm]);
+
+  const startIdx = totalItems > 0 ? (currentPage - 1) * pageSize + 1 : 0;
   const endIdx = Math.min(currentPage * pageSize, totalItems);
 
   return (
@@ -131,9 +187,25 @@ export function DataTable<T extends Record<string, any>>({
       )}
 
       {/* Main Table Card */}
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-sm overflow-hidden">
-        <div className="w-full overflow-x-auto">
-          <table className="w-full text-sm border-collapse text-left">
+      <div className="relative rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] shadow-sm overflow-hidden">
+        {isLoading && data.length > 0 && (
+          <div className="absolute inset-0 bg-white/40 backdrop-blur-[0.5px] flex items-center justify-center z-20 pointer-events-none">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white shadow-md border border-slate-200">
+              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+              <span className="text-xs font-semibold text-slate-700">Updating records...</span>
+            </div>
+          </div>
+        )}
+
+        {isLoading && data.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+            <span className="text-xs font-medium text-slate-400">Loading records...</span>
+          </div>
+        ) : (
+          <>
+            <div className="w-full overflow-x-auto">
+            <table className="w-full text-sm border-collapse text-left">
             <thead>
               <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--muted))]/40">
                 {columns.map((column) => (
@@ -228,12 +300,13 @@ export function DataTable<T extends Record<string, any>>({
                 <select
                   value={pageSize}
                   onChange={(e) => {
-                    setPageSize(Number(e.target.value));
+                    const newSize = Number(e.target.value);
+                    setPageSize(newSize);
                     setCurrentPage(1);
                   }}
                   className="h-8 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-2 text-xs text-[hsl(var(--foreground))] focus:outline-none focus:ring-1 focus:ring-[hsl(var(--ring))]"
                 >
-                  {[10, 20, 55, 100].map((size) => (
+                  {[10, 20, 25, 50, 100, 200].map((size) => (
                     <option key={size} value={size}>
                       {size}
                     </option>
@@ -286,6 +359,8 @@ export function DataTable<T extends Record<string, any>>({
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
     </div>
