@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -26,7 +27,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Overlay */}
       <div
@@ -76,6 +77,7 @@ export function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

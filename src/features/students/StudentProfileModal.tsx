@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Student } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,7 +26,7 @@ export function StudentProfileModal({ student, onClose }: StudentProfileModalPro
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose} />
       
@@ -182,6 +183,7 @@ export function StudentProfileModal({ student, onClose }: StudentProfileModalPro
           </Button>
         </div>
       </Card>
-    </div>
+    </div>,
+    document.body
   );
 }

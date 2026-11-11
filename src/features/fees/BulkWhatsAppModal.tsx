@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, MessageCircle, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -62,7 +63,7 @@ export function BulkWhatsAppModal({ records, type, onClose, onAlertSent }: BulkW
   const isDone = currentIndex >= filteredRecords.length;
   const currentRecord = filteredRecords[currentIndex];
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
@@ -225,6 +226,7 @@ export function BulkWhatsAppModal({ records, type, onClose, onAlertSent }: BulkW
           )}
         </div>
       </Card>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X } from 'lucide-react';
 import type { Invoice, Student } from '@/types';
 import { APP_NAME } from '@/lib/constants';
@@ -300,7 +301,7 @@ export function BankInvoicePrint({ invoice, student, arrears = 0, onClose }: Ban
   };
 
   // ── Modal ─────────────────────────────────────────────────────────────────
-  return (
+  return createPortal(
     <>
       {/* Fixed full-screen backdrop */}
       <div className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -364,6 +365,7 @@ export function BankInvoicePrint({ invoice, student, arrears = 0, onClose }: Ban
 
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

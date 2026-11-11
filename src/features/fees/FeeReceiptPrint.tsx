@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Invoice, Student, Fee } from '@/types';
@@ -146,7 +147,7 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
     .filter((f) => f.paidDate && f.paidAmount > 0)
     .sort((a, b) => (a.paidDate || '').localeCompare(b.paidDate || ''));
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-3xl max-h-[95vh] flex flex-col z-10 animate-scale-in bg-white rounded-2xl shadow-2xl overflow-hidden">
@@ -292,6 +293,7 @@ export function FeeReceiptPrint({ invoice, student, allFees, onClose }: FeeRecei
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -675,7 +675,15 @@ export default function AcademyStudentsPage() {
           setPaymentInvoice(null);
         }}
         onSuccess={(data?: AcademyPaymentReceiptData) => {
-          loadData();
+          const mainEl = document.querySelector('main');
+          const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+          loadData().then(() => {
+            if (mainEl && savedScrollTop > 0) {
+              requestAnimationFrame(() => {
+                mainEl.scrollTop = savedScrollTop;
+              });
+            }
+          });
           if (data) {
             setReceiptData(data);
           }

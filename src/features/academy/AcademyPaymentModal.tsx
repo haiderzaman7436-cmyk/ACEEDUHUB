@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2, CreditCard, CheckCircle2, Banknote, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -239,7 +240,9 @@ export function AcademyPaymentModal({
     }
   };
 
-  return (
+  if (!isOpen) return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
       <Card className="relative w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden bg-white shadow-2xl border-slate-200">
         {/* Header */}
@@ -552,7 +555,8 @@ export function AcademyPaymentModal({
           </div>
         </form>
       </Card>
-    </div>
+    </div>,
+    document.body
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Search, Plus, Minus, ShoppingCart, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -140,7 +141,7 @@ export function AddInventoryToInvoiceModal({ invoice, onClose, onSuccess }: AddI
     return sum + (item ? item.price * qty : 0);
   }, 0);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         
@@ -281,6 +282,7 @@ export function AddInventoryToInvoiceModal({ invoice, onClose, onSuccess }: AddI
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

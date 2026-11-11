@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Eye, X, CreditCard, Loader2, CheckCircle2,
   Plus, Receipt, Banknote, Printer, MessageCircle, ShoppingCart
@@ -87,7 +88,7 @@ export default function InvoicesPage() {
   const loadInvoices = useCallback(() => {
     setIsLoading(true);
     const fetchPromise = showAllMonths ? getInvoices() : getInvoicesByMonth(selectedMonth);
-    fetchPromise
+    return fetchPromise
       .then((data) => setInvoices(data))
       .catch((error) => {
         console.error('Failed to load invoices:', error);
@@ -239,10 +240,17 @@ export default function InvoicesPage() {
 
   const handleDeleteInvoice = async (inv: Invoice) => {
     if (!window.confirm('Are you sure you want to delete this invoice? The linked fee will also be deleted.')) return;
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
     try {
       await deleteInvoice(inv.id);
       toast.success('Invoice and its linked fee deleted successfully.');
-      loadInvoices();
+      await loadInvoices();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
     } catch (error) {
       console.error(error);
       toast.error('Failed to delete invoice.');
@@ -253,6 +261,8 @@ export default function InvoicesPage() {
     e.preventDefault();
     if (!payInvTarget || payAmount <= 0 || !user) return;
     setIsSubmitting(true);
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
     try {
       await payInvoice(payInvTarget.id, {
         amount: payAmount,
@@ -262,7 +272,12 @@ export default function InvoicesPage() {
       });
       toast.success(`Payment of ${formatCurrency(payAmount)} recorded for ${payInvTarget.invoiceNumber}`);
       setIsPayOpen(false);
-      loadInvoices();
+      await loadInvoices();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
     } catch {
       toast.error('Payment failed. Please try again.');
     } finally {
@@ -454,7 +469,18 @@ export default function InvoicesPage() {
           {(item.status === 'overdue' || item.status === 'draft' || item.status === 'sent' || item.status === 'partial') && !item.alertSentAt && (
             <Button
               size="sm"
-              onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
+              onClick={() => {
+                const mainEl = document.querySelector('main');
+                const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+                sendWhatsAppAlert(item, 'Invoice').then(async () => {
+                  await loadInvoices();
+                  if (mainEl && savedScrollTop > 0) {
+                    requestAnimationFrame(() => {
+                      mainEl.scrollTop = savedScrollTop;
+                    });
+                  }
+                });
+              }}
               className="h-8 px-2.5 gap-1 text-xs bg-green-500 hover:bg-green-600 text-white font-semibold shrink-0"
               title="Send WhatsApp Alert"
             >
@@ -466,7 +492,18 @@ export default function InvoicesPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => sendWhatsAppAlert(item, 'Invoice').then(loadInvoices)}
+              onClick={() => {
+                const mainEl = document.querySelector('main');
+                const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+                sendWhatsAppAlert(item, 'Invoice').then(async () => {
+                  await loadInvoices();
+                  if (mainEl && savedScrollTop > 0) {
+                    requestAnimationFrame(() => {
+                      mainEl.scrollTop = savedScrollTop;
+                    });
+                  }
+                });
+              }}
               className="h-8 px-2.5 gap-1 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 font-semibold shrink-0"
               title="Resend WhatsApp Alert"
             >
@@ -545,7 +582,7 @@ export default function InvoicesPage() {
       )}
 
       {/* Pay Invoice Modal */}
-      {isPayOpen && payInvTarget && (
+      {isPayOpen && payInvTarget && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsPayOpen(false)} />
           <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
@@ -629,11 +666,12 @@ export default function InvoicesPage() {
               </div>
             </form>
           </Card>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Invoice Preview Modal */}
-      {isPreviewOpen && selectedInvoice && (
+      {isPreviewOpen && selectedInvoice && createPortal(
         <>
           {/* Fixed full-screen backdrop */}
           <div
@@ -789,7 +827,8 @@ export default function InvoicesPage() {
               </div>{/* end scrollable body */}
             </div>{/* end modal card */}
           </div>{/* end fixed wrapper */}
-        </>
+        </>,
+        document.body
       )}
 
       {/* Filter / Summary Toolbar */}
