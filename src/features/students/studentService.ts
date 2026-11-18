@@ -3,12 +3,17 @@
 // ============================================================================
 
 import {
-  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, deleteField,
   query, orderBy, serverTimestamp, Timestamp, where, writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Student } from '@/types';
-import { assignFeesForNewStudent, assignCustomFeesForStudent } from '@/features/fees/feeService';
+import {
+  assignFeesForNewStudent,
+  assignCustomFeesForStudent,
+  isBillableActiveStudent,
+  removeUnpaidInvoicesForStudent,
+} from '@/features/fees/feeService';
 
 function toDate(val: unknown): Date {
   if (!val) return new Date();
@@ -64,18 +69,21 @@ export async function addStudent(
 
   await logActivity(creatorId, 'Enrolled new student', `${newStudent.firstName} ${newStudent.lastName} admitted to ${newStudent.className}`);
 
-  // Auto-assign monthly fees from fee templates (if any templates are configured)
-  try {
-    await assignFeesForNewStudent(newStudent);
-  } catch (err) {
-    console.warn('Auto fee assignment failed (no template configured?):', err);
-  }
+  // Only assign automatic fees/invoices if the student is actively enrolled
+  if (isBillableActiveStudent(newStudent)) {
+    // Auto-assign monthly fees from fee templates (if any templates are configured)
+    try {
+      await assignFeesForNewStudent(newStudent);
+    } catch (err) {
+      console.warn('Auto fee assignment failed (no template configured?):', err);
+    }
 
-  // Owner-defined custom fees entered directly on the student form
-  try {
-    await assignCustomFeesForStudent(newStudent);
-  } catch (err) {
-    console.warn('Custom fee assignment failed:', err);
+    // Owner-defined custom fees entered directly on the student form
+    try {
+      await assignCustomFeesForStudent(newStudent);
+    } catch (err) {
+      console.warn('Custom fee assignment failed:', err);
+    }
   }
 
   return newStudent;
@@ -86,10 +94,26 @@ export async function updateStudent(
   studentData: Partial<Student>,
   updaterId: string,
 ): Promise<Student> {
-  await updateDoc(doc(db, 'students', id), {
+  const payload: Record<string, any> = {
     ...studentData,
     updatedAt: serverTimestamp(),
-  });
+  };
+
+  const isBecomingNonActive =
+    studentData.status !== undefined && !isBillableActiveStudent({ status: studentData.status });
+
+  if (studentData.status === 'struck_off') {
+    payload.struckOffAt = serverTimestamp();
+  } else if (studentData.status === 'active') {
+    payload.struckOffAt = deleteField();
+  }
+
+  await updateDoc(doc(db, 'students', id), payload);
+
+  // If student is struck off or moved to any non-active status, clean up unpaid current/future invoices
+  if (isBecomingNonActive) {
+    await removeUnpaidInvoicesForStudent(id, true);
+  }
 
   await logActivity(updaterId, 'Updated student record', `Student profile ${id} was modified.`);
 
@@ -99,9 +123,30 @@ export async function updateStudent(
   return finalStudent;
 }
 
+export async function strikeOffStudent(
+  id: string,
+  userId: string,
+): Promise<{ removedInvoices: number; removedFees: number }> {
+  await updateDoc(doc(db, 'students', id), {
+    status: 'struck_off',
+    struckOffAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+  const cleaned = await removeUnpaidInvoicesForStudent(id, true);
+  await logActivity(
+    userId,
+    'Struck off student',
+    `Student ${id} marked as struck off. Removed ${cleaned.removedInvoices} unpaid current/future invoice(s).`,
+  );
+  return cleaned;
+}
+
 export async function deleteStudent(id: string, deleterId: string): Promise<void> {
   await deleteDoc(doc(db, 'students', id));
-  await logActivity(deleterId, 'Deleted student record', `Student profile ${id} was removed.`);
+  // Automatically remove unpaid invoices & fees for the discarded student (keeping paid history intact)
+  await removeUnpaidInvoicesForStudent(id, false);
+  await logActivity(deleterId, 'Deleted student record', `Student profile ${id} and unpaid invoices were removed.`);
 }
 
 // ── Class Promotion ────────────────────────────────────────────────────────

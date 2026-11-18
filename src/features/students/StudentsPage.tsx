@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Plus, Eye, Edit2, Trash2, ArrowRightCircle, Loader2, X, GraduationCap } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { Plus, Eye, Edit2, Trash2, ArrowRightCircle, Loader2, X, GraduationCap, UserX } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Badge } from '@/components/ui/badge';
@@ -7,19 +8,28 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
-import { getStatusColor, formatDate } from '@/lib/utils';
-import { getStudents, deleteStudent, addStudent, updateStudent, promoteStudents } from './studentService';
+import { getStatusColor, formatDate, formatCurrency } from '@/lib/utils';
+import { getStudents, deleteStudent, addStudent, updateStudent, promoteStudents, strikeOffStudent } from './studentService';
+import { getFeeTemplates, getInvoices, computeStudentMonthlyFee } from '@/features/fees/feeService';
 import { StudentForm } from './StudentForm';
 import { StudentProfileModal } from './StudentProfileModal';
 import type { StudentFormInput } from './studentValidation';
-import type { Student } from '@/types';
+import type { Student, FeeTemplate, Invoice } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import { toast } from 'sonner';
+
+type StudentRow = Student & {
+  monthlyFee: number;
+  latestInvoice?: Invoice;
+};
 
 export default function StudentsPage() {
   const { user } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
+  const [feeTemplates, setFeeTemplates] = useState<FeeTemplate[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [classFilter, setClassFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
 
@@ -38,14 +48,23 @@ export default function StudentsPage() {
   const [formTitle, setFormTitle] = useState('Enroll Student');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
 
-  // Dialog / Delete States
+  // Dialog / Delete & Strike-Off States
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [strikeOffTarget, setStrikeOffTarget] = useState<Student | null>(null);
+  const [isStrikingOff, setIsStrikingOff] = useState(false);
 
   const loadStudents = () => {
-    getStudents()
-      .then((data) => setStudents(data));
+    Promise.all([
+      getStudents(),
+      getFeeTemplates().catch(() => [] as FeeTemplate[]),
+      getInvoices().catch(() => [] as Invoice[]),
+    ]).then(([studs, templates, invs]) => {
+      setStudents(studs);
+      setFeeTemplates(templates);
+      setInvoices(invs);
+    });
   };
 
   useEffect(() => {
@@ -102,7 +121,7 @@ export default function StudentsPage() {
     setIsDeleting(true);
     try {
       await deleteStudent(selectedStudentId, user.uid || 'admin');
-      toast.success('Student record deleted successfully.');
+      toast.success('Student record and unpaid invoices removed successfully.');
       loadStudents();
     } catch (err) {
       toast.error('Failed to delete student.');
@@ -110,6 +129,24 @@ export default function StudentsPage() {
       setIsDeleting(false);
       setIsDeleteOpen(false);
       setSelectedStudentId(null);
+    }
+  };
+
+  const handleConfirmStrikeOff = async () => {
+    if (!strikeOffTarget || !user) return;
+    setIsStrikingOff(true);
+    try {
+      const cleaned = await strikeOffStudent(strikeOffTarget.id, user.uid || 'admin');
+      toast.success(
+        `${strikeOffTarget.firstName} ${strikeOffTarget.lastName} marked as Struck Off.` +
+        (cleaned.removedInvoices > 0 ? ` Removed ${cleaned.removedInvoices} unpaid current/future invoice(s).` : ''),
+      );
+      loadStudents();
+    } catch {
+      toast.error('Failed to strike off student.');
+    } finally {
+      setIsStrikingOff(false);
+      setStrikeOffTarget(null);
     }
   };
 
@@ -154,17 +191,41 @@ export default function StudentsPage() {
     }
   };
 
-  // Filter Data by Class
-  const filteredStudents = students.filter((s) => {
-    if (!classFilter) return true;
-    return s.className.toLowerCase() === classFilter.toLowerCase();
-  });
+  // Map each student to their most recent invoice for fee summary display
+  const latestInvoiceByStudent = useMemo(() => {
+    const map = new Map<string, Invoice>();
+    for (const inv of invoices) {
+      if (!inv.studentId) continue;
+      if (!map.has(inv.studentId)) {
+        map.set(inv.studentId, inv);
+      }
+    }
+    return map;
+  }, [invoices]);
+
+  // Filter Data by Class & Status and attach computed Monthly Fee
+  const filteredStudents: StudentRow[] = useMemo(() => {
+    return students
+      .filter((s) => {
+        const matchesClass = !classFilter || s.className.toLowerCase() === classFilter.toLowerCase();
+        const matchesStatus = !statusFilter || s.status === statusFilter;
+        return matchesClass && matchesStatus;
+      })
+      .map((s) => {
+        const latestInvoice = latestInvoiceByStudent.get(s.id);
+        return {
+          ...s,
+          monthlyFee: computeStudentMonthlyFee(s, feeTemplates, latestInvoice),
+          latestInvoice,
+        };
+      });
+  }, [students, classFilter, statusFilter, feeTemplates, latestInvoiceByStudent]);
 
   // Extract unique classes for filter list
   const uniqueClasses = Array.from(new Set(students.map((s) => s.className)));
 
   // Define Columns
-  const columns: Column<Student>[] = [
+  const columns: Column<StudentRow>[] = [
     {
       key: 'name',
       header: 'Student Name',
@@ -216,6 +277,36 @@ export default function StudentsPage() {
       },
     },
     {
+      key: 'monthlyFee',
+      header: 'Monthly Fee',
+      sortable: true,
+      align: 'right',
+      cell: (item) => {
+        const inv = item.latestInvoice;
+        const due = inv ? Math.max(0, inv.grandTotal - (inv.paidAmount || 0)) : 0;
+        return (
+          <div className="whitespace-nowrap">
+            <div className="text-sm font-bold text-slate-800">{formatCurrency(item.monthlyFee)}</div>
+            {inv ? (
+              <div className={`text-[10px] font-semibold ${
+                inv.status === 'paid'
+                  ? 'text-emerald-600'
+                  : inv.status === 'partial'
+                    ? 'text-blue-600'
+                    : 'text-red-500'
+              }`}>
+                {inv.status === 'paid'
+                  ? `Paid (${inv.month || 'Latest'})`
+                  : `Due: ${formatCurrency(due)}`}
+              </div>
+            ) : (
+              <div className="text-[10px] text-slate-400">Monthly</div>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       key: 'admissionDate',
       header: 'Admitted On',
       sortable: true,
@@ -226,8 +317,8 @@ export default function StudentsPage() {
       header: 'Status',
       sortable: true,
       cell: (item) => (
-        <Badge variant="outline" className={getStatusColor(item.status)}>
-          {item.status}
+        <Badge variant="outline" className={`${getStatusColor(item.status)} capitalize`}>
+          {item.status.replace('_', ' ')}
         </Badge>
       ),
     },
@@ -255,6 +346,17 @@ export default function StudentsPage() {
           >
             <Edit2 className="h-4 w-4" />
           </Button>
+          {item.status === 'active' && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8.5 w-8.5 text-[hsl(var(--muted-foreground))] hover:text-amber-600 hover:bg-amber-50 rounded-lg"
+              title="Strike Off Student"
+              onClick={() => setStrikeOffTarget(item)}
+            >
+              <UserX className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -300,18 +402,33 @@ export default function StudentsPage() {
         searchPlaceholder="Search students by name..."
         paginationKey="students"
         filterComponent={
-          <select
-            value={classFilter}
-            onChange={(e) => setClassFilter(e.target.value)}
-            className="h-10 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:ring-offset-2 transition-all duration-200"
-          >
-            <option value="">All Classes</option>
-            {uniqueClasses.map((cls) => (
-              <option key={cls} value={cls}>
-                {cls}
-              </option>
-            ))}
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-10 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:ring-offset-2 transition-all duration-200"
+            >
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="struck_off">Struck Off</option>
+              <option value="inactive">Inactive</option>
+              <option value="transferred">Transferred</option>
+              <option value="suspended">Suspended</option>
+              <option value="graduated">Graduated</option>
+            </select>
+            <select
+              value={classFilter}
+              onChange={(e) => setClassFilter(e.target.value)}
+              className="h-10 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] px-3 text-sm text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[hsl(var(--ring))] focus:ring-offset-2 transition-all duration-200"
+            >
+              <option value="">All Classes</option>
+              {uniqueClasses.map((cls) => (
+                <option key={cls} value={cls}>
+                  {cls}
+                </option>
+              ))}
+            </select>
+          </div>
         }
       />
 
@@ -332,20 +449,36 @@ export default function StudentsPage() {
         title={formTitle}
       />
 
+      {/* Strike Off Student Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!strikeOffTarget}
+        onClose={() => setStrikeOffTarget(null)}
+        onConfirm={handleConfirmStrikeOff}
+        title="Strike Off Student?"
+        description={
+          strikeOffTarget
+            ? `Mark ${strikeOffTarget.firstName} ${strikeOffTarget.lastName} as Struck Off? Any unpaid invoices for the current or future months will be removed, paid history will remain preserved, and no new monthly invoices will ever be generated for this student.`
+            : ''
+        }
+        confirmLabel="Strike Off Student"
+        isDestructive
+        isLoading={isStrikingOff}
+      />
+
       {/* Delete Safety Confirmation Dialog */}
       <ConfirmDialog
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
         onConfirm={handleConfirmDelete}
         title="Delete Student Record?"
-        description="This action is permanent and cannot be undone. All linked guardian mappings, attendance files, and invoices will remain intact but disconnected."
+        description="This action is permanent and cannot be undone. All unpaid invoices for this student will also be removed and no future invoices will be generated, while historical paid records remain preserved."
         confirmLabel="Delete Record"
         isDestructive
         isLoading={isDeleting}
       />
 
       {/* ── Class Promotion Modal ──────────────────────────────────────── */}
-      {isPromoteOpen && (
+      {isPromoteOpen && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsPromoteOpen(false)} />
           <Card className="relative w-full max-w-lg z-10 animate-scale-in shadow-2xl border-indigo-200">
@@ -464,7 +597,8 @@ export default function StudentsPage() {
               </div>
             </div>
           </Card>
-        </div>
+        </div>,
+        document.body
       )}
       
       {/* Student Profile View Modal */}

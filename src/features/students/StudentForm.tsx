@@ -1,4 +1,5 @@
 import { useForm, useFieldArray } from 'react-hook-form';
+import { createPortal } from 'react-dom';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { X, Plus, Trash2, Loader2, Save, Receipt } from 'lucide-react';
 import { studentSchema, type StudentFormInput } from './studentValidation';
@@ -152,7 +153,7 @@ export function StudentForm({
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-end">
       {/* Overlay */}
       <div
@@ -215,6 +216,7 @@ export function StudentForm({
                 <label className="text-xs font-semibold text-[hsl(var(--foreground))]">Status</label>
                 <select {...register('status')} className={selectCls}>
                   <option value="active">Active</option>
+                  <option value="struck_off">Struck Off</option>
                   <option value="inactive">Inactive</option>
                   <option value="graduated">Graduated</option>
                   <option value="transferred">Transferred</option>
@@ -540,7 +542,8 @@ export function StudentForm({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 export default StudentForm;

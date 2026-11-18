@@ -40,7 +40,7 @@ export interface StudentDocument {
   uploadedBy: string;
 }
 
-export type StudentStatus = 'active' | 'inactive' | 'graduated' | 'transferred' | 'suspended';
+export type StudentStatus = 'active' | 'inactive' | 'graduated' | 'transferred' | 'suspended' | 'struck_off';
 
 export interface Student {
   id: string;
@@ -66,6 +66,7 @@ export interface Student {
   feeEntries?: FeeEntry[];   // owner-defined custom fees set on the student form
   category?: 'school' | 'academy'; // institution category
   status: StudentStatus;
+  struckOffAt?: Date;
   previousSchool?: string;
   nationality?: string;
   religion?: string;
@@ -264,6 +265,7 @@ export interface Invoice {
   tax: number;
   grandTotal: number;
   paidAmount: number;
+  paymentMethod?: PaymentMethod;
   status: InvoiceStatus;
   notes?: string;
   dueDate: string;

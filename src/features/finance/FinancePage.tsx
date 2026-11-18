@@ -251,7 +251,7 @@ export default function FinancePage() {
                         <td className="p-3 font-semibold text-slate-700">{inv.studentName}</td>
                         <td className="p-3 text-slate-500">{inv.className}</td>
                         <td className="p-3 text-right font-bold text-emerald-600">{formatCurrency(inv.paidAmount || 0)}</td>
-                        <td className="p-3 text-slate-400 capitalize">Cash/Online</td>
+                        <td className="p-3 text-slate-400 capitalize">{(inv.paymentMethod || 'Cash/Online').replace('_', ' ')}</td>
                       </tr>
                     ))}
                   </tbody>

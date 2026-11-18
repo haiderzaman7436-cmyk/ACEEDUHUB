@@ -4,14 +4,17 @@
 // ============================================================================
 
 import { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus, Edit2, Trash2, Loader2, Eye,
   Building2, BookOpen, X, Receipt, Target, AlertCircle, Banknote, CalendarDays, ChevronDown, CreditCard,
+  Pencil, RotateCcw, UserX,
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ConfirmDialog } from '@/components/common/ConfirmDialog';
@@ -20,8 +23,8 @@ import { StudentProfileModal } from '@/features/students/StudentProfileModal';
 import { AcademyPaymentModal, type AcademyPaymentReceiptData } from './AcademyPaymentModal';
 import { FeeReceiptPrint } from '@/features/fees/FeeReceiptPrint';
 import { getStatusColor, formatDate, formatCurrency } from '@/lib/utils';
-import { getStudents, deleteStudent, addStudent, updateStudent } from '@/features/students/studentService';
-import { getInvoices } from '@/features/fees/feeService';
+import { getStudents, deleteStudent, addStudent, updateStudent, strikeOffStudent } from '@/features/students/studentService';
+import { getInvoices, updateInvoicePayment, deleteInvoicePayment } from '@/features/fees/feeService';
 import type { StudentFormInput } from '@/features/students/studentValidation';
 import type { Student, Invoice, Fee } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
@@ -53,16 +56,27 @@ export default function AcademyStudentsPage() {
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
 
-  // Delete Dialog
+  // Delete & Strike Off Dialogs
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [strikeOffTarget, setStrikeOffTarget] = useState<Student | null>(null);
+  const [isStrikingOff, setIsStrikingOff] = useState(false);
 
   // Payment Modal States
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
   const [receiptData, setReceiptData] = useState<{ invoice: Invoice; student: Student; fees: Fee[] } | null>(null);
+
+  // Edit / Delete Payment States
+  const [editPayTarget, setEditPayTarget] = useState<Invoice | null>(null);
+  const [editPayAmount, setEditPayAmount] = useState(0);
+  const [editPayMethod, setEditPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
+  const [editPayNotes, setEditPayNotes] = useState('');
+  const [isUpdatingPayment, setIsUpdatingPayment] = useState(false);
+  const [deletePayTarget, setDeletePayTarget] = useState<Invoice | null>(null);
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
 
   // Analysis Filter State — strictly monthly by default
   const currentMonthLabel = useMemo(() => getCurrentMonthLabel(), []);
@@ -120,7 +134,7 @@ export default function AcademyStudentsPage() {
     setIsDeleting(true);
     try {
       await deleteStudent(selectedStudentId, user.uid || 'admin');
-      toast.success('Student record deleted successfully.');
+      toast.success('Student record and unpaid invoices removed successfully.');
       loadData();
     } catch {
       toast.error('Failed to delete student record.');
@@ -128,6 +142,97 @@ export default function AcademyStudentsPage() {
       setIsDeleting(false);
       setIsDeleteOpen(false);
       setSelectedStudentId(null);
+    }
+  };
+
+  const handleConfirmStrikeOff = async () => {
+    if (!strikeOffTarget || !user) return;
+    setIsStrikingOff(true);
+    try {
+      const cleaned = await strikeOffStudent(strikeOffTarget.id, user.uid || 'admin');
+      toast.success(
+        `${strikeOffTarget.firstName} ${strikeOffTarget.lastName} marked as Struck Off.` +
+        (cleaned.removedInvoices > 0 ? ` Removed ${cleaned.removedInvoices} unpaid current/future invoice(s).` : ''),
+      );
+      loadData();
+    } catch {
+      toast.error('Failed to strike off student.');
+    } finally {
+      setIsStrikingOff(false);
+      setStrikeOffTarget(null);
+    }
+  };
+
+  const handleOpenEditPayment = (inv: Invoice) => {
+    setEditPayTarget(inv);
+    setEditPayAmount(inv.paidAmount || 0);
+    setEditPayMethod(
+      (inv.paymentMethod === 'cash' ||
+        inv.paymentMethod === 'bank_transfer' ||
+        inv.paymentMethod === 'cheque' ||
+        inv.paymentMethod === 'online')
+        ? inv.paymentMethod
+        : 'cash',
+    );
+    setEditPayNotes(inv.notes || '');
+  };
+
+  const handleEditPaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPayTarget || !user) return;
+    if (editPayAmount < 0 || editPayAmount > editPayTarget.grandTotal) {
+      toast.error(`Paid amount must be between Rs 0 and ${formatCurrency(editPayTarget.grandTotal)}.`);
+      return;
+    }
+    setIsUpdatingPayment(true);
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+    try {
+      await updateInvoicePayment(editPayTarget.id, {
+        paidAmount: editPayAmount,
+        method: editPayMethod,
+        notes: editPayNotes.trim(),
+        collectorId: user.uid || 'admin',
+        collectorName: user.displayName || 'Admin',
+      });
+      toast.success(
+        editPayAmount === 0
+          ? `Payment deleted for ${editPayTarget.invoiceNumber}. Invoice reset to unpaid.`
+          : `Payment updated to ${formatCurrency(editPayAmount)} for ${editPayTarget.invoiceNumber}.`,
+      );
+      setEditPayTarget(null);
+      await loadData();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
+    } catch {
+      toast.error('Failed to update payment.');
+    } finally {
+      setIsUpdatingPayment(false);
+    }
+  };
+
+  const handleConfirmDeletePayment = async () => {
+    if (!deletePayTarget) return;
+    setIsDeletingPayment(true);
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+    try {
+      await deleteInvoicePayment(deletePayTarget.id);
+      toast.success(`Payment deleted for ${deletePayTarget.invoiceNumber}. Invoice reset to unpaid.`);
+      setDeletePayTarget(null);
+      await loadData();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
+    } catch {
+      toast.error('Failed to delete payment.');
+    } finally {
+      setIsDeletingPayment(false);
     }
   };
 
@@ -223,8 +328,8 @@ export default function AcademyStudentsPage() {
       header: 'Status',
       sortable: true,
       cell: (item) => (
-        <Badge className={`text-xs font-semibold ${getStatusColor(item.status)}`}>
-          {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+        <Badge className={`text-xs font-semibold capitalize ${getStatusColor(item.status)}`}>
+          {item.status.replace('_', ' ')}
         </Badge>
       ),
     },
@@ -234,15 +339,17 @@ export default function AcademyStudentsPage() {
       align: 'right',
       cell: (item) => (
         <div className="flex items-center gap-1.5 justify-end">
-          <Button
-            size="sm"
-            onClick={() => handleOpenPayment(item)}
-            className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs font-semibold shadow-sm transition-all"
-            title={`Record Payment for ${item.firstName}`}
-          >
-            <CreditCard className="h-3.5 w-3.5" />
-            <span>Pay</span>
-          </Button>
+          {item.status === 'active' && (
+            <Button
+              size="sm"
+              onClick={() => handleOpenPayment(item)}
+              className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 text-xs font-semibold shadow-sm transition-all"
+              title={`Record Payment for ${item.firstName}`}
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              <span>Pay</span>
+            </Button>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -261,6 +368,17 @@ export default function AcademyStudentsPage() {
           >
             <Edit2 className="h-4 w-4" />
           </Button>
+          {item.status === 'active' && (
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50"
+              onClick={() => setStrikeOffTarget(item)}
+              title="Strike Off Student"
+            >
+              <UserX className="h-4 w-4" />
+            </Button>
+          )}
           <Button
             size="icon"
             variant="ghost"
@@ -315,6 +433,7 @@ export default function AcademyStudentsPage() {
       header: 'Status',
       cell: (item) => {
         if (item.status === 'paid') return <Badge className="bg-emerald-100 text-emerald-700">Paid</Badge>;
+        if (item.status === 'partial') return <Badge className="bg-blue-100 text-blue-700">Partial</Badge>;
         if (item.status === 'overdue') return <Badge className="bg-red-100 text-red-700">Overdue</Badge>;
         return <Badge className="bg-amber-100 text-amber-700">Pending</Badge>;
       },
@@ -324,7 +443,7 @@ export default function AcademyStudentsPage() {
       header: 'Actions',
       align: 'right',
       cell: (item) => (
-        <div className="flex items-center gap-1.5 justify-end">
+        <div className="flex items-center gap-1.5 justify-end whitespace-nowrap">
           {item.status !== 'paid' && item.status !== 'cancelled' ? (
             <Button
               size="sm"
@@ -343,6 +462,28 @@ export default function AcademyStudentsPage() {
               ✓ Settled
             </span>
           )}
+          {hasRole(['admin', 'manager']) && (item.paidAmount || 0) > 0 && item.status !== 'cancelled' && (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                onClick={() => handleOpenEditPayment(item)}
+                title="Edit Payment"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                onClick={() => setDeletePayTarget(item)}
+                title="Delete Payment (Reset to Unpaid)"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          )}
         </div>
       ),
     },
@@ -355,10 +496,25 @@ export default function AcademyStudentsPage() {
         onClose={() => setIsDeleteOpen(false)}
         onConfirm={handleDeleteConfirm}
         title="Delete Academy Student"
-        description="This will permanently remove the student record. This action cannot be undone."
+        description="This will permanently remove the student record and any unpaid invoices. Historical paid records will remain preserved and no future invoices will be generated."
         confirmLabel="Delete"
         isDestructive
         isLoading={isDeleting}
+      />
+
+      <ConfirmDialog
+        isOpen={!!strikeOffTarget}
+        onClose={() => setStrikeOffTarget(null)}
+        onConfirm={handleConfirmStrikeOff}
+        title="Strike Off Academy Student?"
+        description={
+          strikeOffTarget
+            ? `Mark ${strikeOffTarget.firstName} ${strikeOffTarget.lastName} as Struck Off? Unpaid invoices for current/future months will be removed and no new invoices will be generated for them.`
+            : ''
+        }
+        confirmLabel="Strike Off Student"
+        isDestructive
+        isLoading={isStrikingOff}
       />
 
       <StudentForm
@@ -688,10 +844,131 @@ export default function AcademyStudentsPage() {
             setReceiptData(data);
           }
         }}
-        students={students}
+        students={students.filter((s) => s.status === 'active' || s.id === paymentStudent?.id)}
         invoices={invoices}
         initialStudent={paymentStudent}
         initialInvoice={paymentInvoice}
+      />
+
+      {/* Edit Academy Payment Modal */}
+      {editPayTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditPayTarget(null)} />
+          <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-slate-800 text-base">Edit Payment</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{editPayTarget.invoiceNumber}</p>
+              </div>
+              <button onClick={() => setEditPayTarget(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditPaySubmit} className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-xl p-4 space-y-1.5 text-sm border border-slate-100">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Student:</span>
+                  <span className="font-semibold text-slate-800">{editPayTarget.studentName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Invoice Total:</span>
+                  <span className="font-semibold">{formatCurrency(editPayTarget.grandTotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Current Paid:</span>
+                  <span className="text-emerald-600 font-semibold">{formatCurrency(editPayTarget.paidAmount || 0)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1">
+                  <span className="font-semibold text-slate-700">New Balance Due:</span>
+                  <span className="font-bold text-red-600">
+                    {formatCurrency(Math.max(0, editPayTarget.grandTotal - (Number(editPayAmount) || 0)))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">
+                  Updated Paid Amount (PKR) <span className="text-slate-400 font-normal">(0 = reset to unpaid)</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={editPayTarget.grandTotal}
+                  value={editPayAmount}
+                  onChange={(e) => setEditPayAmount(Number(e.target.value))}
+                  required
+                  className="border-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Payment Method</label>
+                <select
+                  value={editPayMethod}
+                  onChange={(e) => setEditPayMethod(e.target.value as any)}
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="online">Online Payment</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Notes (Optional)</label>
+                <Input
+                  value={editPayNotes}
+                  onChange={(e) => setEditPayNotes(e.target.value)}
+                  placeholder="Reason for adjustment..."
+                  className="border-slate-200"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const target = editPayTarget;
+                    setEditPayTarget(null);
+                    setDeletePayTarget(target);
+                  }}
+                  disabled={isUpdatingPayment}
+                  className="text-amber-700 border-amber-200 hover:bg-amber-50 gap-1.5"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Delete Payment
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => setEditPayTarget(null)} disabled={isUpdatingPayment}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isUpdatingPayment} className="bg-violet-600 hover:bg-violet-700 text-white">
+                    {isUpdatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Changes'}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </Card>
+        </div>,
+        document.body
+      )}
+
+      {/* Delete / Revert Academy Payment Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletePayTarget}
+        onClose={() => setDeletePayTarget(null)}
+        onConfirm={handleConfirmDeletePayment}
+        title="Delete Payment Record?"
+        description={
+          deletePayTarget
+            ? `Remove the recorded payment of ${formatCurrency(deletePayTarget.paidAmount || 0)} for ${deletePayTarget.studentName} (${deletePayTarget.invoiceNumber}) and reset the invoice back to unpaid?`
+            : ''
+        }
+        confirmLabel="Delete Payment"
+        isDestructive
+        isLoading={isDeletingPayment}
       />
 
       {/* Printable Fee Receipt Modal */}

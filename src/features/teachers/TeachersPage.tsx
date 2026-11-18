@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Edit2, Trash2, Mail, Phone, Banknote, History, X, Loader2 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { DataTable, type Column } from '@/components/common/DataTable';
@@ -13,7 +14,7 @@ import { TeacherForm } from './TeacherForm';
 import type { Teacher, SalaryPayment } from '@/types';
 import { useAuth } from '@/features/auth/AuthContext';
 import { toast } from 'sonner';
-import { recordSalaryPayment, getSalaryPaymentsByTeacher } from './salaryService';
+import { recordSalaryPayment, updateSalaryPayment, deleteSalaryPayment, getSalaryPaymentsByTeacher } from './salaryService';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -51,6 +52,11 @@ export default function TeachersPage() {
   const [historyTeacher, setHistoryTeacher] = useState<Teacher | null>(null);
   const [salaryHistory, setSalaryHistory] = useState<SalaryPayment[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // Edit / Delete Salary Payment States
+  const [editingSalaryPayment, setEditingSalaryPayment] = useState<SalaryPayment | null>(null);
+  const [deleteSalaryTarget, setDeleteSalaryTarget] = useState<SalaryPayment | null>(null);
+  const [isDeletingSalary, setIsDeletingSalary] = useState(false);
 
   const loadTeachers = () => {
     getTeachers()
@@ -115,6 +121,7 @@ export default function TeachersPage() {
 
   // Salary actions
   const handlePaySalaryClick = (teacher: Teacher) => {
+    setEditingSalaryPayment(null);
     setSalaryTeacher(teacher);
     setPayMonth(MONTHS[new Date().getMonth()]);
     setPayYear(new Date().getFullYear());
@@ -125,36 +132,92 @@ export default function TeachersPage() {
     setIsSalaryModalOpen(true);
   };
 
+  const handleEditSalaryPaymentClick = (payment: SalaryPayment) => {
+    if (!historyTeacher) return;
+    setEditingSalaryPayment(payment);
+    setSalaryTeacher(historyTeacher);
+    setPayMonth(payment.month);
+    setPayYear(payment.year);
+    setPayDeductions(payment.deductions || 0);
+    setPayBonus(payment.bonus || 0);
+    setPayMethod(payment.paymentMethod);
+    setPayNotes(payment.notes || '');
+    setIsSalaryModalOpen(true);
+  };
+
   const handlePaySalarySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!salaryTeacher || !user) return;
     setIsPayingSalary(true);
 
-    const basic = salaryTeacher.salary || 0;
+    const basic = editingSalaryPayment ? editingSalaryPayment.basicSalary : (salaryTeacher.salary || 0);
     const net = basic - payDeductions + payBonus;
 
     try {
-      await recordSalaryPayment({
-        teacherId: salaryTeacher.id,
-        teacherName: `${salaryTeacher.firstName} ${salaryTeacher.lastName}`,
-        month: payMonth,
-        year: payYear,
-        monthLabel: `${payMonth} ${payYear}`,
-        basicSalary: basic,
-        deductions: payDeductions,
-        bonus: payBonus,
-        netSalary: net,
-        paymentMethod: payMethod,
-        notes: payNotes,
-        status: 'paid'
-      }, user.uid || 'admin', user.displayName || 'Authorized User');
+      if (editingSalaryPayment) {
+        await updateSalaryPayment(
+          editingSalaryPayment.id,
+          {
+            month: payMonth,
+            year: payYear,
+            monthLabel: `${payMonth} ${payYear}`,
+            basicSalary: basic,
+            deductions: payDeductions,
+            bonus: payBonus,
+            netSalary: net,
+            paymentMethod: payMethod,
+            notes: payNotes,
+          },
+          user.uid || 'admin',
+        );
+        toast.success(`Salary payment ${editingSalaryPayment.receiptNumber} updated.`);
+        setIsSalaryModalOpen(false);
+        setEditingSalaryPayment(null);
+        if (historyTeacher) {
+          const updated = await getSalaryPaymentsByTeacher(historyTeacher.id);
+          setSalaryHistory(updated);
+        }
+      } else {
+        await recordSalaryPayment({
+          teacherId: salaryTeacher.id,
+          teacherName: `${salaryTeacher.firstName} ${salaryTeacher.lastName}`,
+          month: payMonth,
+          year: payYear,
+          monthLabel: `${payMonth} ${payYear}`,
+          basicSalary: basic,
+          deductions: payDeductions,
+          bonus: payBonus,
+          netSalary: net,
+          paymentMethod: payMethod,
+          notes: payNotes,
+          status: 'paid'
+        }, user.uid || 'admin', user.displayName || 'Authorized User');
 
-      toast.success(`Salary of ${formatCurrency(net)} recorded for ${salaryTeacher.firstName}`);
-      setIsSalaryModalOpen(false);
+        toast.success(`Salary of ${formatCurrency(net)} recorded for ${salaryTeacher.firstName}`);
+        setIsSalaryModalOpen(false);
+      }
     } catch (err) {
-      toast.error('Failed to record salary payment.');
+      toast.error(editingSalaryPayment ? 'Failed to update salary payment.' : 'Failed to record salary payment.');
     } finally {
       setIsPayingSalary(false);
+    }
+  };
+
+  const handleConfirmDeleteSalaryPayment = async () => {
+    if (!deleteSalaryTarget || !user) return;
+    setIsDeletingSalary(true);
+    try {
+      await deleteSalaryPayment(deleteSalaryTarget.id, user.uid || 'admin');
+      toast.success(`Salary payment ${deleteSalaryTarget.receiptNumber} deleted.`);
+      setDeleteSalaryTarget(null);
+      if (historyTeacher) {
+        const updated = await getSalaryPaymentsByTeacher(historyTeacher.id);
+        setSalaryHistory(updated);
+      }
+    } catch {
+      toast.error('Failed to delete salary payment.');
+    } finally {
+      setIsDeletingSalary(false);
     }
   };
 
@@ -312,7 +375,7 @@ export default function TeachersPage() {
     },
   ];
 
-  const basic = salaryTeacher?.salary || 0;
+  const basic = editingSalaryPayment ? editingSalaryPayment.basicSalary : (salaryTeacher?.salary || 0);
   const netSalary = basic - payDeductions + payBonus;
 
   return (
@@ -347,17 +410,21 @@ export default function TeachersPage() {
         }
       />
 
-      {/* Pay Salary Modal */}
-      {isSalaryModalOpen && salaryTeacher && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsSalaryModalOpen(false)} />
+      {/* Pay / Edit Salary Modal */}
+      {isSalaryModalOpen && salaryTeacher && createPortal(
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setIsSalaryModalOpen(false); setEditingSalaryPayment(null); }} />
           <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <div>
-                <h2 className="font-bold text-slate-800 text-base">Disburse Salary</h2>
-                <p className="text-xs text-slate-400 mt-0.5">{salaryTeacher.firstName} {salaryTeacher.lastName} ({salaryTeacher.employeeId})</p>
+                <h2 className="font-bold text-slate-800 text-base">
+                  {editingSalaryPayment ? 'Edit Salary Payment' : 'Disburse Salary'}
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {salaryTeacher.firstName} {salaryTeacher.lastName} ({editingSalaryPayment ? editingSalaryPayment.receiptNumber : salaryTeacher.employeeId})
+                </p>
               </div>
-              <button onClick={() => setIsSalaryModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => { setIsSalaryModalOpen(false); setEditingSalaryPayment(null); }} className="text-slate-400 hover:text-slate-600">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -454,21 +521,22 @@ export default function TeachersPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <Button type="button" variant="outline" size="sm" onClick={() => setIsSalaryModalOpen(false)} disabled={isPayingSalary}>Cancel</Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setIsSalaryModalOpen(false); setEditingSalaryPayment(null); }} disabled={isPayingSalary}>Cancel</Button>
                 <Button type="submit" size="sm" disabled={isPayingSalary} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
-                  {isPayingSalary ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Confirm Payment'}
+                  {isPayingSalary ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingSalaryPayment ? 'Save Changes' : 'Confirm Payment')}
                 </Button>
               </div>
             </form>
           </Card>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Salary History Modal */}
-      {isHistoryModalOpen && historyTeacher && (
+      {isHistoryModalOpen && historyTeacher && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsHistoryModalOpen(false)} />
-          <Card className="relative w-full max-w-2xl z-10 animate-scale-in shadow-2xl border-slate-200 overflow-hidden max-h-[85vh] flex flex-col">
+          <Card className="relative w-full max-w-3xl z-10 animate-scale-in shadow-2xl border-slate-200 overflow-hidden max-h-[85vh] flex flex-col">
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-slate-800 text-base">Salary Disbursement Ledger</h2>
@@ -487,7 +555,7 @@ export default function TeachersPage() {
                 </div>
               ) : salaryHistory.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 text-xs">
-                  No salary payments disubursed yet for this instructor.
+                  No salary payments disbursed yet for this instructor.
                 </div>
               ) : (
                 <div className="border border-slate-100 rounded-xl overflow-hidden text-xs">
@@ -502,6 +570,7 @@ export default function TeachersPage() {
                         <th className="p-3 text-right font-semibold text-slate-500 uppercase text-[9px]">Net Paid</th>
                         <th className="p-3 font-semibold text-slate-500 uppercase text-[9px]">Method</th>
                         <th className="p-3 font-semibold text-slate-500 uppercase text-[9px]">Paid On</th>
+                        <th className="p-3 text-right font-semibold text-slate-500 uppercase text-[9px]">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
@@ -515,6 +584,28 @@ export default function TeachersPage() {
                           <td className="p-3 text-right font-bold text-slate-900">{formatCurrency(p.netSalary)}</td>
                           <td className="p-3 font-semibold text-slate-700 capitalize">{p.paymentMethod.replace('_', ' ')}</td>
                           <td className="p-3 text-slate-500">{new Date(p.paidAt).toLocaleDateString()}</td>
+                          <td className="p-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 rounded-lg text-blue-600 hover:bg-blue-50"
+                                title="Edit Salary Payment"
+                                onClick={() => handleEditSalaryPaymentClick(p)}
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 rounded-lg text-red-500 hover:bg-red-50"
+                                title="Delete Salary Payment"
+                                onClick={() => setDeleteSalaryTarget(p)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -527,8 +618,25 @@ export default function TeachersPage() {
               <Button size="sm" variant="outline" onClick={() => setIsHistoryModalOpen(false)}>Close</Button>
             </div>
           </Card>
-        </div>
+        </div>,
+        document.body
       )}
+
+      {/* Delete Salary Payment Safety Dialog */}
+      <ConfirmDialog
+        isOpen={!!deleteSalaryTarget}
+        onClose={() => setDeleteSalaryTarget(null)}
+        onConfirm={handleConfirmDeleteSalaryPayment}
+        title="Delete Salary Payment?"
+        description={
+          deleteSalaryTarget
+            ? `Permanently delete salary payment ${deleteSalaryTarget.receiptNumber} (${formatCurrency(deleteSalaryTarget.netSalary)} for ${deleteSalaryTarget.monthLabel})?`
+            : ''
+        }
+        confirmLabel="Delete Payment"
+        isDestructive
+        isLoading={isDeletingSalary}
+      />
 
       {/* Slide-over Staff Form */}
       <TeacherForm

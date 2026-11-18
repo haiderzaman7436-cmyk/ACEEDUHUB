@@ -37,7 +37,7 @@ export const studentSchema = z.object({
   documents: z.array(z.any()).default([]),
   feeEntries: z.array(feeEntrySchema).default([]),
   notes: z.string().optional(),
-  status: z.enum(['active', 'inactive', 'graduated', 'transferred', 'suspended']).default('active'),
+  status: z.enum(['active', 'inactive', 'graduated', 'transferred', 'suspended', 'struck_off']).default('active'),
 });
 
 export type StudentFormInput = z.infer<typeof studentSchema>;

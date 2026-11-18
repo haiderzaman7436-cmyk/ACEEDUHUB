@@ -2,17 +2,19 @@ import { useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Eye, X, CreditCard, Loader2, CheckCircle2,
-  Plus, Receipt, Banknote, Printer, MessageCircle, ShoppingCart
+  Plus, Receipt, Banknote, Printer, MessageCircle, ShoppingCart,
+  Pencil, RotateCcw
 } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { ConfirmDialog } from '@/components/common/ConfirmDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { DataTable, type Column } from '@/components/common/DataTable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
-  getInvoices, getInvoicesByMonth, payInvoice, generateMonthlyFeesForAll,
-  getStudentArrears, deleteInvoice
+  getInvoices, getInvoicesByMonth, payInvoice, updateInvoicePayment, deleteInvoicePayment,
+  generateMonthlyFeesForAll, getStudentArrears, deleteInvoice
 } from '@/features/fees/feeService';
 import { sendWhatsAppAlert } from '@/features/fees/whatsappService';
 import { getStudentById } from '@/features/students/studentService';
@@ -74,6 +76,18 @@ export default function InvoicesPage() {
   const [payArrears, setPayArrears] = useState(0);
   const [payMethod, setPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Edit Payment modal
+  const [isEditPayOpen, setIsEditPayOpen] = useState(false);
+  const [editPayTarget, setEditPayTarget] = useState<Invoice | null>(null);
+  const [editPayAmount, setEditPayAmount] = useState(0);
+  const [editPayMethod, setEditPayMethod] = useState<'cash' | 'bank_transfer' | 'cheque' | 'online'>('cash');
+  const [editPayNotes, setEditPayNotes] = useState('');
+  const [isUpdatingPayment, setIsUpdatingPayment] = useState(false);
+
+  // Delete / Revert Payment confirm dialog
+  const [deletePayTarget, setDeletePayTarget] = useState<Invoice | null>(null);
+  const [isDeletingPayment, setIsDeletingPayment] = useState(false);
 
   // Filters — strictly monthly by default
   const [classFilter, setClassFilter] = useState('');
@@ -285,16 +299,94 @@ export default function InvoicesPage() {
     }
   };
 
+  const handleOpenEditPayment = (inv: Invoice) => {
+    setEditPayTarget(inv);
+    setEditPayAmount(inv.paidAmount || 0);
+    setEditPayMethod(
+      (inv.paymentMethod === 'cash' ||
+        inv.paymentMethod === 'bank_transfer' ||
+        inv.paymentMethod === 'cheque' ||
+        inv.paymentMethod === 'online')
+        ? inv.paymentMethod
+        : 'cash',
+    );
+    setEditPayNotes(inv.notes || '');
+    setIsEditPayOpen(true);
+  };
+
+  const handleEditPaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPayTarget || !user) return;
+    if (editPayAmount < 0 || editPayAmount > editPayTarget.grandTotal) {
+      toast.error(`Paid amount must be between Rs 0 and ${formatCurrency(editPayTarget.grandTotal)}.`);
+      return;
+    }
+    setIsUpdatingPayment(true);
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+    try {
+      await updateInvoicePayment(editPayTarget.id, {
+        paidAmount: editPayAmount,
+        method: editPayMethod,
+        notes: editPayNotes.trim(),
+        collectorId: user.uid || 'admin',
+        collectorName: user.displayName || 'Admin',
+      });
+      toast.success(
+        editPayAmount === 0
+          ? `Payment removed for ${editPayTarget.invoiceNumber}. Invoice reset to unpaid.`
+          : `Payment updated to ${formatCurrency(editPayAmount)} for ${editPayTarget.invoiceNumber}.`,
+      );
+      setIsEditPayOpen(false);
+      setEditPayTarget(null);
+      await loadInvoices();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
+    } catch {
+      toast.error('Failed to update payment. Please try again.');
+    } finally {
+      setIsUpdatingPayment(false);
+    }
+  };
+
+  const handleConfirmDeletePayment = async () => {
+    if (!deletePayTarget) return;
+    setIsDeletingPayment(true);
+    const mainEl = document.querySelector('main');
+    const savedScrollTop = mainEl ? mainEl.scrollTop : window.scrollY;
+    try {
+      await deleteInvoicePayment(deletePayTarget.id);
+      toast.success(`Payment deleted for ${deletePayTarget.invoiceNumber}. Invoice reset to unpaid.`);
+      setDeletePayTarget(null);
+      await loadInvoices();
+      if (mainEl && savedScrollTop > 0) {
+        requestAnimationFrame(() => {
+          mainEl.scrollTop = savedScrollTop;
+        });
+      }
+    } catch {
+      toast.error('Failed to delete payment. Please try again.');
+    } finally {
+      setIsDeletingPayment(false);
+    }
+  };
+
   const handleGenerateMonthlyFees = async () => {
     setIsSubmitting(true);
     try {
       const targetMonth = selectedMonth;
       const result = await generateMonthlyFeesForAll(targetMonth);
-      if (result.success === 0 && result.skipped === 0 && result.missingTemplates === 0) {
-        toast.info(`No unbilled students found for ${targetMonth}.`);
+      if (result.success === 0 && result.skipped === 0 && result.missingTemplates === 0 && !result.cleanedInactive) {
+        toast.info(`No unbilled active students found for ${targetMonth}.`);
       } else {
         let msg = `Monthly fees generated for ${targetMonth}: ${result.success} new.`;
         if (result.skipped > 0) msg += ` ${result.skipped} already billed.`;
+        if (result.cleanedInactive && result.cleanedInactive > 0) {
+          msg += ` Removed ${result.cleanedInactive} unpaid invoice(s) of struck-off/inactive students.`;
+        }
         if (result.missingTemplates > 0) {
           msg += ` WARNING: ${result.missingTemplates} students skipped (No Fee Template configured for their class!).`;
           toast.warning(msg);
@@ -415,7 +507,7 @@ export default function InvoicesPage() {
       key: 'actions',
       header: 'Actions',
       align: 'right',
-      width: '280px',
+      width: '340px',
       cell: (item) => (
         <div className="flex items-center gap-1.5 justify-end whitespace-nowrap">
           {/* View Details */}
@@ -516,6 +608,30 @@ export default function InvoicesPage() {
               <CheckCircle2 className="h-3.5 w-3.5" />
               Paid
             </span>
+          )}
+
+          {/* Edit Payment & Delete Payment (for paid or partial invoices) */}
+          {hasRole(['admin', 'manager']) && (item.paidAmount || 0) > 0 && item.status !== 'cancelled' && (
+            <>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 rounded-lg text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                onClick={() => handleOpenEditPayment(item)}
+                title="Edit Payment"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 shrink-0 rounded-lg text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                onClick={() => setDeletePayTarget(item)}
+                title="Delete Payment (Reset to Unpaid)"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </>
           )}
           
           {hasRole(['admin', 'manager']) && (
@@ -669,6 +785,133 @@ export default function InvoicesPage() {
         </div>,
         document.body
       )}
+
+      {/* Edit Payment Modal */}
+      {isEditPayOpen && editPayTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsEditPayOpen(false)} />
+          <Card className="relative w-full max-w-md z-10 animate-scale-in shadow-2xl border-slate-200">
+            <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-slate-800 text-base">Edit Payment</h2>
+                <p className="text-xs text-slate-400 mt-0.5">{editPayTarget.invoiceNumber}</p>
+              </div>
+              <button onClick={() => setIsEditPayOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditPaySubmit} className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-xl p-4 space-y-1.5 text-sm border border-slate-100">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Student:</span>
+                  <span className="font-semibold text-slate-800">{editPayTarget.studentName}</span>
+                </div>
+                {editPayTarget.month && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Month:</span>
+                    <span className="font-semibold text-blue-700">{editPayTarget.month}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Invoice Total:</span>
+                  <span className="font-semibold">{formatCurrency(editPayTarget.grandTotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Current Paid:</span>
+                  <span className="text-emerald-600 font-semibold">{formatCurrency(editPayTarget.paidAmount || 0)}</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1">
+                  <span className="font-semibold text-slate-700">New Balance Due:</span>
+                  <span className="font-bold text-red-600">
+                    {formatCurrency(Math.max(0, editPayTarget.grandTotal - (Number(editPayAmount) || 0)))}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">
+                  Updated Paid Amount (PKR) <span className="text-slate-400 font-normal">(0 = reset to unpaid)</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={editPayTarget.grandTotal}
+                  value={editPayAmount}
+                  onChange={(e) => setEditPayAmount(Number(e.target.value))}
+                  required
+                  className="border-slate-200"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Payment Method</label>
+                <select
+                  value={editPayMethod}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEditPayMethod(e.target.value as any)}
+                  className="flex h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cheque">Cheque</option>
+                  <option value="online">Online Payment</option>
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">Notes (Optional)</label>
+                <Input
+                  value={editPayNotes}
+                  onChange={(e) => setEditPayNotes(e.target.value)}
+                  placeholder="Reason for adjustment or remarks..."
+                  className="border-slate-200"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-100">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const target = editPayTarget;
+                    setIsEditPayOpen(false);
+                    setDeletePayTarget(target);
+                  }}
+                  disabled={isUpdatingPayment}
+                  className="text-amber-700 border-amber-200 hover:bg-amber-50 gap-1.5"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Delete Payment
+                </Button>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => setIsEditPayOpen(false)} disabled={isUpdatingPayment}>
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isUpdatingPayment} className="bg-blue-600 hover:bg-blue-700 text-white">
+                    {isUpdatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save Changes'}
+                  </Button>
+                </div>
+              </div>
+            </form>
+          </Card>
+        </div>,
+        document.body
+      )}
+
+      {/* Delete / Revert Payment Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletePayTarget}
+        onClose={() => setDeletePayTarget(null)}
+        onConfirm={handleConfirmDeletePayment}
+        title="Delete Payment Record?"
+        description={
+          deletePayTarget
+            ? `This will remove the recorded payment of ${formatCurrency(deletePayTarget.paidAmount || 0)} for ${deletePayTarget.studentName} (${deletePayTarget.invoiceNumber}) and reset the invoice status back to unpaid. The invoice itself will remain intact.`
+            : ''
+        }
+        confirmLabel="Delete Payment"
+        isDestructive
+        isLoading={isDeletingPayment}
+      />
 
       {/* Invoice Preview Modal */}
       {isPreviewOpen && selectedInvoice && createPortal(

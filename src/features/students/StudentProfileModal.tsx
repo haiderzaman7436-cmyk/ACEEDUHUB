@@ -1,9 +1,12 @@
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Student } from '@/types';
+import type { Student, Invoice, FeeTemplate } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, User, Users, Phone, MapPin, Activity, AlertCircle } from 'lucide-react';
+import { X, User, Users, Phone, MapPin, Activity, AlertCircle, Banknote } from 'lucide-react';
+import { formatCurrency } from '@/lib/utils';
+import { getInvoicesByStudent, getFeeTemplates, computeStudentMonthlyFee } from '@/features/fees/feeService';
 
 interface StudentProfileModalProps {
   student: Student;
@@ -11,6 +14,29 @@ interface StudentProfileModalProps {
 }
 
 export function StudentProfileModal({ student, onClose }: StudentProfileModalProps) {
+  const [studentInvoices, setStudentInvoices] = useState<Invoice[]>([]);
+  const [feeTemplates, setFeeTemplates] = useState<FeeTemplate[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      getInvoicesByStudent(student.id).catch(() => [] as Invoice[]),
+      getFeeTemplates().catch(() => [] as FeeTemplate[]),
+    ]).then(([invs, templates]) => {
+      if (!active) return;
+      setStudentInvoices(invs);
+      setFeeTemplates(templates);
+    });
+    return () => {
+      active = false;
+    };
+  }, [student.id]);
+
+  const latestInvoice = studentInvoices[0] || null;
+  const monthlyFee = computeStudentMonthlyFee(student, feeTemplates, latestInvoice);
+  const totalBilled = studentInvoices.reduce((s, inv) => s + (inv.grandTotal || 0), 0);
+  const totalPaid = studentInvoices.reduce((s, inv) => s + (inv.paidAmount || 0), 0);
+  const totalOutstanding = Math.max(0, totalBilled - totalPaid);
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active':
@@ -19,6 +45,8 @@ export function StudentProfileModal({ student, onClose }: StudentProfileModalPro
         return 'bg-blue-100 text-blue-700 border-blue-200';
       case 'suspended':
         return 'bg-amber-100 text-amber-700 border-amber-200';
+      case 'struck_off':
+        return 'bg-rose-100 text-rose-700 border-rose-200';
       case 'left':
         return 'bg-slate-100 text-slate-700 border-slate-200';
       default:
@@ -57,24 +85,83 @@ export function StudentProfileModal({ student, onClose }: StudentProfileModalPro
 
         <CardContent className="relative z-10 p-6 flex-1 overflow-y-auto space-y-6 bg-slate-50/50">
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
               <span className="text-xs text-slate-500 font-medium mb-1">Status</span>
               <Badge variant="outline" className={`${getStatusColor(student.status)} font-semibold uppercase tracking-wider text-[10px]`}>
-                {student.status}
+                {student.status.replace('_', ' ')}
               </Badge>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+            <div className="bg-white p-3.5 rounded-xl border border-emerald-100 shadow-sm flex flex-col items-center text-center">
+              <span className="text-xs text-slate-500 font-medium mb-1">Monthly Fee</span>
+              <span className="font-bold text-emerald-700 text-sm">{formatCurrency(monthlyFee)}</span>
+            </div>
+            <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
               <span className="text-xs text-slate-500 font-medium mb-1">Admission ID</span>
-              <span className="font-bold text-slate-800">{student.admissionNumber}</span>
+              <span className="font-bold text-slate-800 text-sm">{student.admissionNumber}</span>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
               <span className="text-xs text-slate-500 font-medium mb-1">Roll No</span>
-              <span className="font-bold text-slate-800">{student.rollNumber || 'N/A'}</span>
+              <span className="font-bold text-slate-800 text-sm">{student.rollNumber || 'N/A'}</span>
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center">
+            <div className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex flex-col items-center text-center col-span-2 md:col-span-1">
               <span className="text-xs text-slate-500 font-medium mb-1">Admitted On</span>
               <span className="font-bold text-slate-800 text-sm">{new Date(student.admissionDate).toLocaleDateString()}</span>
+            </div>
+          </div>
+
+          {/* Fee & Billing Summary */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <Banknote className="h-4 w-4 text-emerald-600" />
+              Fee &amp; Billing Summary
+            </h3>
+            <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 space-y-3">
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="rounded-lg bg-slate-50 p-2.5">
+                  <div className="text-[11px] text-slate-500 font-medium">Total Billed</div>
+                  <div className="text-sm font-bold text-slate-800 mt-0.5">{formatCurrency(totalBilled)}</div>
+                </div>
+                <div className="rounded-lg bg-emerald-50 p-2.5">
+                  <div className="text-[11px] text-emerald-700 font-medium">Total Paid</div>
+                  <div className="text-sm font-bold text-emerald-700 mt-0.5">{formatCurrency(totalPaid)}</div>
+                </div>
+                <div className="rounded-lg bg-red-50 p-2.5">
+                  <div className="text-[11px] text-red-600 font-medium">Outstanding</div>
+                  <div className="text-sm font-bold text-red-600 mt-0.5">{formatCurrency(totalOutstanding)}</div>
+                </div>
+              </div>
+              {student.feeEntries && student.feeEntries.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Custom Fee Entries</div>
+                  {student.feeEntries.map((entry, idx) => (
+                    <div key={entry.id || idx} className="flex justify-between items-center text-xs">
+                      <span className="text-slate-700 font-medium">{entry.description}</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(entry.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {latestInvoice && (
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-slate-500">
+                    Latest Invoice: <strong className="text-slate-700">{latestInvoice.invoiceNumber}</strong>
+                    {latestInvoice.month ? ` (${latestInvoice.month})` : ''}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={`capitalize text-[10px] font-semibold ${
+                      latestInvoice.status === 'paid'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : latestInvoice.status === 'partial'
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-red-50 text-red-700 border-red-200'
+                    }`}
+                  >
+                    {latestInvoice.status}
+                  </Badge>
+                </div>
+              )}
             </div>
           </div>
 

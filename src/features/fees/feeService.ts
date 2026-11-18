@@ -3,13 +3,137 @@
 // ============================================================================
 
 import {
-  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, deleteField,
   query, where, orderBy, Timestamp, serverTimestamp, writeBatch
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Fee, Invoice, FeeTemplate, Student } from '@/types';
 import { generateReceiptNumber } from '@/lib/utils';
 import { getNextInvoiceNumber, reserveInvoiceNumbers } from '@/lib/counterService';
+
+// ── Active / Billable Student Guard ──────────────────────────────────────────
+
+export const NON_BILLABLE_STUDENT_STATUSES = new Set([
+  'inactive',
+  'struck_off',
+  'struck off',
+  'struckoff',
+  'left',
+  'discarded',
+  'graduated',
+  'transferred',
+  'suspended',
+  'deleted',
+]);
+
+/**
+ * Strictly determines whether a student is currently active and eligible for
+ * monthly fee/invoice generation. Excludes struck-off, inactive, suspended,
+ * transferred, graduated, left, and discarded students.
+ */
+export function isBillableActiveStudent(student: (Partial<Student> & Record<string, any>) | null | undefined): boolean {
+  if (!student) return false;
+  if (student.isDeleted === true || student.deletedAt || student.struckOffAt || student.discarded === true) {
+    return false;
+  }
+  const normalized = String(student.status || '').trim().toLowerCase();
+  if (NON_BILLABLE_STUDENT_STATUSES.has(normalized)) return false;
+  return normalized === 'active';
+}
+
+const MONTH_NAMES = [
+  'january', 'february', 'march', 'april', 'may', 'june',
+  'july', 'august', 'september', 'october', 'november', 'december',
+];
+
+function isMonthCurrentOrFuture(monthLabel?: string, dueDate?: string): boolean {
+  const now = new Date();
+  const currentMonthIndex = now.getFullYear() * 12 + now.getMonth();
+
+  if (monthLabel) {
+    const parts = monthLabel.trim().toLowerCase().split(/\s+/);
+    if (parts.length >= 2) {
+      const mIdx = MONTH_NAMES.indexOf(parts[0]);
+      const yr = parseInt(parts[1], 10);
+      if (mIdx !== -1 && !isNaN(yr)) {
+        return yr * 12 + mIdx >= currentMonthIndex;
+      }
+    }
+  }
+
+  if (dueDate) {
+    const d = new Date(dueDate);
+    if (!isNaN(d.getTime())) {
+      return d.getFullYear() * 12 + d.getMonth() >= currentMonthIndex;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Removes unpaid (paidAmount === 0) invoices and linked unpaid fees for a student
+ * who has been struck off, marked inactive/left, or deleted/discarded.
+ * Paid and partially paid historical records are always preserved intact.
+ */
+export async function removeUnpaidInvoicesForStudent(
+  studentId: string,
+  onlyCurrentAndFutureMonths = false,
+): Promise<{ removedInvoices: number; removedFees: number }> {
+  let removedInvoices = 0;
+  let removedFees = 0;
+  const deletedFeeIds = new Set<string>();
+
+  try {
+    const invSnap = await getDocs(query(collection(db, 'invoices'), where('studentId', '==', studentId)));
+    for (const d of invSnap.docs) {
+      const inv = d.data();
+      const paid = Number(inv.paidAmount || 0);
+      if (paid > 0 || inv.status === 'paid') continue;
+      if (onlyCurrentAndFutureMonths && !isMonthCurrentOrFuture(inv.month, inv.dueDate)) continue;
+
+      try {
+        await deleteDoc(doc(db, 'invoices', d.id));
+        removedInvoices++;
+      } catch (err) {
+        console.warn('removeUnpaidInvoicesForStudent: failed to delete invoice', d.id, err);
+      }
+
+      if (Array.isArray(inv.feeIds)) {
+        for (const feeId of inv.feeIds) {
+          try {
+            const feeSnap = await getDoc(doc(db, 'fees', feeId));
+            if (feeSnap.exists() && Number(feeSnap.data().paidAmount || 0) <= 0 && feeSnap.data().status !== 'paid') {
+              await deleteDoc(doc(db, 'fees', feeId));
+              deletedFeeIds.add(feeId);
+              removedFees++;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    const feesSnap = await getDocs(query(collection(db, 'fees'), where('studentId', '==', studentId)));
+    for (const d of feesSnap.docs) {
+      if (deletedFeeIds.has(d.id)) continue;
+      const fee = d.data();
+      const paid = Number(fee.paidAmount || 0);
+      if (paid > 0 || fee.status === 'paid') continue;
+      if (onlyCurrentAndFutureMonths && !isMonthCurrentOrFuture(fee.month, fee.dueDate)) continue;
+
+      try {
+        await deleteDoc(doc(db, 'fees', d.id));
+        removedFees++;
+      } catch (err) {
+        console.warn('removeUnpaidInvoicesForStudent: failed to delete fee', d.id, err);
+      }
+    }
+  } catch (err) {
+    console.warn('removeUnpaidInvoicesForStudent error:', err);
+  }
+
+  return { removedInvoices, removedFees };
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -128,28 +252,92 @@ export async function updateFeeTemplate(id: string, data: Partial<FeeTemplate>):
 
 // ── Bulk Monthly Fee Generation ─────────────────────────────────────────────
 
-function getDefaultTuitionForClass(className = ''): number {
+export function getDefaultTuitionForClass(className = ''): number {
   const c = className.toLowerCase();
   if (c.includes('10') || c.includes('9') || c.includes('matric')) return 2500;
   if (c.includes('8') || c.includes('7') || c.includes('6')) return 2000;
   return 1500;
 }
 
-export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{ success: number; skipped: number; missingTemplates: number }> {
-  const monthLabel = targetMonth || getMonthLabel();
-  const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
-  const students = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+/**
+ * Computes a student's monthly fee consistently with invoice generation:
+ * 1) Active class fee templates + student custom fee entries
+ * 2) Latest invoice amount (if available and no templates/custom entries)
+ * 3) Default tuition fallback by class
+ */
+export function computeStudentMonthlyFee(
+  student: Student,
+  feeTemplates: FeeTemplate[] = [],
+  latestInvoice?: Invoice | null,
+): number {
+  const activeClassTemplates = feeTemplates.filter(
+    (t) => t.className === student.className && t.isActive !== false,
+  );
+  const customEntries = student.feeEntries || [];
 
-  if (students.length === 0) return { success: 0, skipped: 0, missingTemplates: 0 };
+  if (activeClassTemplates.length > 0 || customEntries.length > 0) {
+    const templateSum = activeClassTemplates.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const customSum = customEntries.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+    return templateSum + customSum;
+  }
+
+  if (latestInvoice && Number(latestInvoice.grandTotal) > 0) {
+    return Number(latestInvoice.grandTotal);
+  }
+
+  return getDefaultTuitionForClass(student.className);
+}
+
+export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{ success: number; skipped: number; missingTemplates: number; cleanedInactive?: number }> {
+  const monthLabel = targetMonth || getMonthLabel();
+  const studentsSnap = await getDocs(collection(db, 'students'));
+  const allStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+  const students = allStudents.filter((s) => isBillableActiveStudent(s));
+  const activeStudentIds = new Set(students.map((s) => s.id));
 
   // PRE-FETCH: Get ALL existing fees and invoices for the target month to prevent any duplicate generation
   const [existingFeesSnap, existingInvoices] = await Promise.all([
     getDocs(query(collection(db, 'fees'), where('month', '==', monthLabel))),
     getInvoicesByMonth(monthLabel)
   ]);
+
+  // Remove any unpaid invoices in this target month belonging to struck-off, inactive, or deleted students
+  let cleanedInactive = 0;
+  for (const inv of existingInvoices) {
+    const paid = Number(inv.paidAmount || 0);
+    if (!activeStudentIds.has(inv.studentId) && paid <= 0 && inv.status !== 'paid') {
+      try {
+        await deleteDoc(doc(db, 'invoices', inv.id));
+        cleanedInactive++;
+        if (inv.feeIds && inv.feeIds.length > 0) {
+          for (const fId of inv.feeIds) {
+            try {
+              const fSnap = await getDoc(doc(db, 'fees', fId));
+              if (fSnap.exists() && Number(fSnap.data().paidAmount || 0) <= 0 && fSnap.data().status !== 'paid') {
+                await deleteDoc(doc(db, 'fees', fId));
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('generateMonthlyFeesForAll: failed to clean inactive student invoice', inv.id, err);
+      }
+    }
+  }
+
+  if (students.length === 0) return { success: 0, skipped: 0, missingTemplates: 0, cleanedInactive };
+
   const billedStudentIds = new Set<string>();
-  existingFeesSnap.docs.forEach(d => billedStudentIds.add(d.data().studentId));
-  existingInvoices.forEach(inv => billedStudentIds.add(inv.studentId));
+  existingFeesSnap.docs.forEach(d => {
+    if (activeStudentIds.has(d.data().studentId)) {
+      billedStudentIds.add(d.data().studentId);
+    }
+  });
+  existingInvoices.forEach(inv => {
+    if (activeStudentIds.has(inv.studentId)) {
+      billedStudentIds.add(inv.studentId);
+    }
+  });
 
   // PRE-FETCH: Get ALL fee templates and map by className
   const templatesSnap = await getDocs(collection(db, 'feeTemplates'));
@@ -260,7 +448,7 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
   }
 
   if (pendingStudentBills.length === 0) {
-    return { success: 0, skipped: skipCount, missingTemplates: missingTemplatesCount };
+    return { success: 0, skipped: skipCount, missingTemplates: missingTemplatesCount, cleanedInactive };
   }
 
   // Reserve exactly 1 invoice number per student in a single super-fast transaction
@@ -349,13 +537,15 @@ export async function generateMonthlyFeesForAll(targetMonth?: string): Promise<{
   return { 
     success: successfulStudentIds.size, 
     skipped: skipCount, 
-    missingTemplates: missingTemplatesCount 
+    missingTemplates: missingTemplatesCount,
+    cleanedInactive,
   };
 }
 
 // ── Auto-assign fees when a student is enrolled ──────────────────────────────
 
 export async function assignFeesForNewStudent(student: Student): Promise<void> {
+  if (!isBillableActiveStudent(student)) return;
   const templates = await getFeeTemplateForClass(student.className);
   if (templates.length === 0) return;
 
@@ -401,6 +591,7 @@ export async function assignFeesForNewStudent(student: Student): Promise<void> {
 // ── Owner-defined custom fees from the Student Form ──────────────────────────
 
 export async function assignCustomFeesForStudent(student: Student): Promise<void> {
+  if (!isBillableActiveStudent(student)) return;
   const entries = student.feeEntries;
   if (!entries || entries.length === 0) return;
 
@@ -642,6 +833,12 @@ export async function getFeesByStudent(studentId: string): Promise<Fee[]> {
 }
 
 export async function addFee(feeData: Omit<Fee, 'id' | 'createdAt' | 'updatedAt'>): Promise<Fee> {
+  // Prevent adding fees/invoices for struck-off, inactive, or deleted students
+  const studentCheckSnap = await getDoc(doc(db, 'students', feeData.studentId));
+  if (!studentCheckSnap.exists() || !isBillableActiveStudent({ id: studentCheckSnap.id, ...studentCheckSnap.data() })) {
+    throw new Error('Cannot create a fee or invoice for a struck-off, inactive, or deleted student.');
+  }
+
   const newId = 'fee-' + Math.random().toString(36).substring(2, 9);
   const now = new Date();
   const newFee: Fee = { ...feeData, id: newId, createdAt: now, updatedAt: now };
@@ -961,6 +1158,7 @@ export async function payInvoice(
 
   await updateDoc(doc(db, 'invoices', invoiceId), {
     paidAmount: newPaid,
+    paymentMethod: paymentData.method,
     status: isFullyPaid ? 'paid' : 'partial',
     ...(isFullyPaid ? { paidAt: serverTimestamp() } : {}),
     updatedAt: serverTimestamp(),
@@ -1018,7 +1216,149 @@ export async function payInvoice(
   }
 
   // Note: Monthly isolation — payment stays strictly with this specific invoice and its linked fees.
-  return { ...inv, paidAmount: newPaid, status: isFullyPaid ? 'paid' : 'sent' };
+  return { ...inv, paidAmount: newPaid, paymentMethod: paymentData.method, status: isFullyPaid ? 'paid' : 'partial' };
+}
+
+/**
+ * Helper to collect all fee document IDs linked to an invoice (both via feeIds array and invoiceId field).
+ */
+async function getLinkedFeeIdsForInvoice(invoiceId: string, invFeeIds?: string[]): Promise<string[]> {
+  const idSet = new Set<string>(invFeeIds || []);
+  try {
+    const q = query(collection(db, 'fees'), where('invoiceId', '==', invoiceId));
+    const snap = await getDocs(q);
+    snap.docs.forEach((d) => idSet.add(d.id));
+  } catch (err) {
+    console.warn('getLinkedFeeIdsForInvoice query error:', err);
+  }
+  return Array.from(idSet);
+}
+
+/**
+ * Edit an already-recorded payment on an invoice (adjust paid amount, payment method, or notes).
+ * Setting paidAmount to 0 cleanly reverts the invoice back to unpaid.
+ */
+export async function updateInvoicePayment(
+  invoiceId: string,
+  paymentData: {
+    paidAmount: number;
+    method: 'cash' | 'bank_transfer' | 'cheque' | 'online';
+    notes?: string;
+    collectorId: string;
+    collectorName: string;
+  },
+): Promise<Invoice> {
+  const snap = await getDoc(doc(db, 'invoices', invoiceId));
+  if (!snap.exists()) throw new Error('Invoice not found.');
+  const inv = { id: snap.id, ...snap.data() } as Invoice;
+
+  const clampedPaid = Math.max(0, Math.min(Number(paymentData.paidAmount) || 0, inv.grandTotal));
+
+  if (clampedPaid <= 0) {
+    return deleteInvoicePayment(invoiceId);
+  }
+
+  const now = new Date();
+  const isFullyPaid = clampedPaid >= inv.grandTotal;
+  const newStatus: Invoice['status'] = isFullyPaid ? 'paid' : 'partial';
+
+  const invUpdate: Record<string, any> = {
+    paidAmount: clampedPaid,
+    paymentMethod: paymentData.method,
+    status: newStatus,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isFullyPaid) {
+    if (!inv.paidAt) invUpdate.paidAt = serverTimestamp();
+  } else {
+    invUpdate.paidAt = deleteField();
+  }
+
+  if (paymentData.notes !== undefined) {
+    invUpdate.notes = paymentData.notes;
+  }
+
+  await updateDoc(doc(db, 'invoices', invoiceId), invUpdate);
+
+  // Sync linked fee records
+  const linkedFeeIds = await getLinkedFeeIdsForInvoice(invoiceId, inv.feeIds);
+  for (const feeId of linkedFeeIds) {
+    try {
+      const feeSnap = await getDoc(doc(db, 'fees', feeId));
+      if (!feeSnap.exists()) continue;
+      const feeData = feeSnap.data();
+      const feeTotal = Number(feeData.amount || inv.grandTotal);
+      const feeFullyPaid = clampedPaid >= feeTotal;
+      await updateDoc(doc(db, 'fees', feeId), {
+        paidAmount: Math.min(clampedPaid, feeTotal),
+        status: feeFullyPaid ? 'paid' : 'partial',
+        paidDate: feeData.paidDate || now.toISOString().split('T')[0],
+        paymentMethod: paymentData.method,
+        collectedBy: paymentData.collectorId,
+        collectedByName: paymentData.collectorName,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('updateInvoicePayment linked fee sync error:', err);
+    }
+  }
+
+  return {
+    ...inv,
+    paidAmount: clampedPaid,
+    paymentMethod: paymentData.method,
+    status: newStatus,
+    ...(paymentData.notes !== undefined ? { notes: paymentData.notes } : {}),
+  };
+}
+
+/**
+ * Delete / revert a recorded payment on an invoice without deleting the invoice itself.
+ * Resets paidAmount to 0 and restores unpaid status on both the invoice and its linked fees.
+ */
+export async function deleteInvoicePayment(invoiceId: string): Promise<Invoice> {
+  const snap = await getDoc(doc(db, 'invoices', invoiceId));
+  if (!snap.exists()) throw new Error('Invoice not found.');
+  const inv = { id: snap.id, ...snap.data() } as Invoice;
+
+  await updateDoc(doc(db, 'invoices', invoiceId), {
+    paidAmount: 0,
+    status: 'sent',
+    paidAt: deleteField(),
+    paymentMethod: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+
+  // Reset all linked fee records back to pending/unpaid
+  const linkedFeeIds = await getLinkedFeeIdsForInvoice(invoiceId, inv.feeIds);
+  for (const feeId of linkedFeeIds) {
+    try {
+      const feeSnap = await getDoc(doc(db, 'fees', feeId));
+      if (!feeSnap.exists()) continue;
+      await updateDoc(doc(db, 'fees', feeId), {
+        paidAmount: 0,
+        status: 'pending',
+        paidDate: deleteField(),
+        paymentMethod: deleteField(),
+        receiptNumber: deleteField(),
+        collectedBy: deleteField(),
+        collectedByName: deleteField(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('deleteInvoicePayment linked fee reset error:', err);
+    }
+  }
+
+  const nextStatus = parseInvoiceStatus({ ...inv, status: 'sent', paidAmount: 0 }) as Invoice['status'];
+  return {
+    ...inv,
+    paidAmount: 0,
+    paymentMethod: undefined,
+    paidAt: undefined,
+    status: nextStatus,
+  };
 }
 
 // ── Grade Registration Fees ───────────────────────────────────────────────────
@@ -1106,10 +1446,14 @@ export async function syncMissingInvoices(): Promise<{ success: number; errors: 
         let category = 'school';
         try {
           const studentSnap = await getDoc(doc(db, 'students', fee.studentId));
-          if (studentSnap.exists()) {
-            category = studentSnap.data().category || 'school';
+          if (!studentSnap.exists() || !isBillableActiveStudent({ id: studentSnap.id, ...studentSnap.data() })) {
+            // Never recreate invoices for struck-off, inactive, or deleted students
+            continue;
           }
-        } catch (e) {}
+          category = studentSnap.data().category || 'school';
+        } catch (e) {
+          continue;
+        }
 
         const invId = 'inv-' + Math.random().toString(36).substring(2, 9);
         const invNumber = await getNextInvoiceNumber();
@@ -1282,9 +1626,11 @@ export async function cleanupDuplicateInvoicesForMonth(monthLabel: string = 'Nov
   const targetMonthName = parts[0] || '';
   const targetYear = parts[1] || '';
 
-  // 1. Fetch active students
-  const studentsSnap = await getDocs(query(collection(db, 'students'), where('status', '==', 'active')));
-  const activeStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+  // 1. Fetch active students (strictly excluding struck-off/inactive/discarded students)
+  const studentsSnap = await getDocs(collection(db, 'students'));
+  const activeStudents = studentsSnap.docs
+    .map(d => ({ id: d.id, ...d.data() } as Student))
+    .filter(s => isBillableActiveStudent(s));
   const activeStudentMap = new Map<string, Student>();
   activeStudents.forEach(s => activeStudentMap.set(s.id, s));
 

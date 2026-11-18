@@ -110,6 +110,7 @@ export function getStatusColor(status: string): string {
     graduated: 'bg-blue-500/15 text-blue-700 dark:text-blue-400',
     transferred: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     suspended: 'bg-red-500/15 text-red-700 dark:text-red-400',
+    struck_off: 'bg-rose-500/15 text-rose-700 dark:text-rose-400',
     on_leave: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
     terminated: 'bg-red-500/15 text-red-700 dark:text-red-400',
     pending: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
