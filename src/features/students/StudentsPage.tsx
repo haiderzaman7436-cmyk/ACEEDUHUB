@@ -281,30 +281,11 @@ export default function StudentsPage() {
       header: 'Monthly Fee',
       sortable: true,
       align: 'right',
-      cell: (item) => {
-        const inv = item.latestInvoice;
-        const due = inv ? Math.max(0, inv.grandTotal - (inv.paidAmount || 0)) : 0;
-        return (
-          <div className="whitespace-nowrap">
-            <div className="text-sm font-bold text-slate-800">{formatCurrency(item.monthlyFee)}</div>
-            {inv ? (
-              <div className={`text-[10px] font-semibold ${
-                inv.status === 'paid'
-                  ? 'text-emerald-600'
-                  : inv.status === 'partial'
-                    ? 'text-blue-600'
-                    : 'text-red-500'
-              }`}>
-                {inv.status === 'paid'
-                  ? `Paid (${inv.month || 'Latest'})`
-                  : `Due: ${formatCurrency(due)}`}
-              </div>
-            ) : (
-              <div className="text-[10px] text-slate-400">Monthly</div>
-            )}
-          </div>
-        );
-      },
+      cell: (item) => (
+        <span className="text-sm font-bold text-slate-800 whitespace-nowrap">
+          {formatCurrency(item.monthlyFee)}
+        </span>
+      ),
     },
     {
       key: 'admissionDate',
